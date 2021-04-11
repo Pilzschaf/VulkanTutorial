@@ -2,6 +2,7 @@
 #include <SDL.h>
 
 #include "logger.h"
+#include "vulkan_base/vulkan_base.h"
 
 bool handleMessage() {
 	SDL_Event event;
@@ -25,6 +26,8 @@ int main() {
 		LOG_ERROR("Error creating SDL window");
 		return 1;
 	}
+
+	VulkanContext* context = initVulkan();
 
 	while (handleMessage()) {
 		//TODO: Render with Vulkan
