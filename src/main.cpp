@@ -1,5 +1,6 @@
 #define SDL_MAIN_HANDLED
 #include <SDL.h>
+#include <SDL_vulkan.h>
 
 #include "logger.h"
 #include "vulkan_base/vulkan_base.h"
@@ -27,7 +28,12 @@ int main() {
 		return 1;
 	}
 
-	VulkanContext* context = initVulkan();
+	uint32_t instanceExtensionCount;
+	SDL_Vulkan_GetInstanceExtensions(window, &instanceExtensionCount, 0);
+	const char** enabledInstanceExtensions = new const char* [instanceExtensionCount];
+	SDL_Vulkan_GetInstanceExtensions(window, &instanceExtensionCount, enabledInstanceExtensions);
+
+	VulkanContext* context = initVulkan(instanceExtensionCount, enabledInstanceExtensions);
 
 	while (handleMessage()) {
 		//TODO: Render with Vulkan
