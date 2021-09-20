@@ -32,13 +32,20 @@ int main() {
 	SDL_Vulkan_GetInstanceExtensions(window, &instanceExtensionCount, 0);
 	const char** enabledInstanceExtensions = new const char* [instanceExtensionCount];
 	SDL_Vulkan_GetInstanceExtensions(window, &instanceExtensionCount, enabledInstanceExtensions);
-
-	VulkanContext* context = initVulkan(instanceExtensionCount, enabledInstanceExtensions, 0, 0);
+	
+	const char* enabledDeviceExtensions[] { VK_KHR_SWAPCHAIN_EXTENSION_NAME };
+	VulkanContext* context = initVulkan(instanceExtensionCount, enabledInstanceExtensions, ARRAY_COUNT(enabledDeviceExtensions), enabledDeviceExtensions);
+	VkSurfaceKHR surface;
+	SDL_Vulkan_CreateSurface(window, context->instance, &surface);
+	VulkanSwapchain swapchain = createSwapchain(context, surface, VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT);
 
 	while (handleMessage()) {
 		//TODO: Render with Vulkan
 	}
 
+	VKA(vkDeviceWaitIdle(context->device));
+	destroySwapchain(context, &swapchain);
+	VK(vkDestroySurfaceKHR(context->instance, surface, 0));
 	exitVulkan(context);
 
 	SDL_DestroyWindow(window);
