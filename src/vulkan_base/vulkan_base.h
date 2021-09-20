@@ -25,6 +25,7 @@ struct VulkanSwapchain {
 	uint32_t height;
 	VkFormat format;
 	std::vector<VkImage> images;
+	std::vector<VkImageView> imageViews;
 };
 
 struct VulkanContext {
@@ -40,3 +41,6 @@ void exitVulkan(VulkanContext* context);
 
 VulkanSwapchain createSwapchain(VulkanContext* context, VkSurfaceKHR surface, VkImageUsageFlags usage);
 void destroySwapchain(VulkanContext* context, VulkanSwapchain* swapchain);
+
+VkRenderPass createRenderPass(VulkanContext* context, VkFormat format);
+void destroyRenderpass(VulkanContext* context, VkRenderPass renderPass);

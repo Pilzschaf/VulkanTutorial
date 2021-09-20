@@ -39,11 +39,30 @@ int main() {
 	SDL_Vulkan_CreateSurface(window, context->instance, &surface);
 	VulkanSwapchain swapchain = createSwapchain(context, surface, VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT);
 
+	VkRenderPass renderPass = createRenderPass(context, swapchain.format);
+	std::vector<VkFramebuffer> framebuffers;
+	framebuffers.resize(swapchain.images.size());
+	for (uint32_t i = 0; i < swapchain.images.size(); ++i) {
+		VkFramebufferCreateInfo createInfo = { VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO };
+		createInfo.renderPass = renderPass;
+		createInfo.attachmentCount = 1;
+		createInfo.pAttachments = &swapchain.imageViews[i];
+		createInfo.width = swapchain.width;
+		createInfo.height = swapchain.height;
+		createInfo.layers = 1;
+		VKA(vkCreateFramebuffer(context->device, &createInfo, 0, &framebuffers[i]));
+	}
+
 	while (handleMessage()) {
 		//TODO: Render with Vulkan
 	}
 
 	VKA(vkDeviceWaitIdle(context->device));
+	for (uint32_t i = 0; i < framebuffers.size(); ++i) {
+		VK(vkDestroyFramebuffer(context->device, framebuffers[i], 0));
+	}
+	framebuffers.clear();
+	destroyRenderpass(context, renderPass);
 	destroySwapchain(context, &swapchain);
 	VK(vkDestroySurfaceKHR(context->instance, surface, 0));
 	exitVulkan(context);
