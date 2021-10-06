@@ -15,8 +15,23 @@ add_subdirectory(libs/SDL)
 # Find Vulkan
 find_package(Vulkan REQUIRED)
 
+if (UNIX)
+add_custom_target(build_shaders ALL
+    COMMAND "${PROJECT_SOURCE_DIR}/shaders/compile.sh"
+    WORKING_DIRECTORY "${PROJECT_SOURCE_DIR}/shaders"
+)
+endif(UNIX)
+
+if (WIN32)
+add_custom_target(build_shaders ALL
+    COMMAND "${PROJECT_SOURCE_DIR}/shaders/compile.bat"
+    WORKING_DIRECTORY "${PROJECT_SOURCE_DIR}/shaders"
+)
+endif(WIN32)
+
 # vulkan_tutorial executable
 add_executable(vulkan_tutorial ${SOURCE_FILES})
+add_dependencies(vulkan_tutorial build_shaders)
 target_include_directories(vulkan_tutorial PUBLIC libs/SDL/include)
 target_link_libraries(vulkan_tutorial PUBLIC SDL2-static)
 target_include_directories(vulkan_tutorial PUBLIC ${Vulkan_INCLUDE_DIRS})
