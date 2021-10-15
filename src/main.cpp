@@ -10,6 +10,7 @@ VkSurfaceKHR surface;
 VulkanSwapchain swapchain;
 VkRenderPass renderPass;
 std::vector<VkFramebuffer> framebuffers;
+VulkanPipeline pipeline;
 VkCommandPool commandPool;
 VkCommandBuffer commandBuffer;
 VkFence fence;
@@ -49,6 +50,8 @@ void initApplication(SDL_Window* window) {
 		createInfo.layers = 1;
 		VKA(vkCreateFramebuffer(context->device, &createInfo, 0, &framebuffers[i]));
 	}
+
+	pipeline = createPipeline(context, "../shaders/triangle_vert.spv", "../shaders/triangle_frag.spv", renderPass, swapchain.width, swapchain.height);
 
 	{
 		VkFenceCreateInfo createInfo = { VK_STRUCTURE_TYPE_FENCE_CREATE_INFO };
@@ -92,6 +95,9 @@ void renderApplication() {
 		beginInfo.pClearValues = &clearValue;
 		vkCmdBeginRenderPass(commandBuffer, &beginInfo, VK_SUBPASS_CONTENTS_INLINE);
 
+		vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline.pipeline);
+		vkCmdDraw(commandBuffer, 3, 1, 0, 0);
+
 		vkCmdEndRenderPass(commandBuffer);
 	}
 	VKA(vkEndCommandBuffer(commandBuffer));
@@ -118,6 +124,8 @@ void shutdownApplication() {
 
 	VK(vkDestroyFence(context->device, fence, 0));
 	VK(vkDestroyCommandPool(context->device, commandPool, 0));
+
+	destroyPipeline(context, &pipeline);
 
 	for (uint32_t i = 0; i < framebuffers.size(); ++i) {
 		VK(vkDestroyFramebuffer(context->device, framebuffers[i], 0));
