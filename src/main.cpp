@@ -14,6 +14,8 @@ VulkanPipeline pipeline;
 VkCommandPool commandPool;
 VkCommandBuffer commandBuffer;
 VkFence fence;
+VkSemaphore acquireSemaphore;
+VkSemaphore releaseSemaphore;
 
 bool handleMessage() {
 	SDL_Event event;
@@ -55,7 +57,13 @@ void initApplication(SDL_Window* window) {
 
 	{
 		VkFenceCreateInfo createInfo = { VK_STRUCTURE_TYPE_FENCE_CREATE_INFO };
+		createInfo.flags = VK_FENCE_CREATE_SIGNALED_BIT;
 		VKA(vkCreateFence(context->device, &createInfo, 0, &fence));
+	}
+	{
+		VkSemaphoreCreateInfo createInfo = { VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO };
+		VKA(vkCreateSemaphore(context->device, &createInfo, 0, &acquireSemaphore));
+		VKA(vkCreateSemaphore(context->device, &createInfo, 0, &releaseSemaphore));
 	}
 
 	{
@@ -78,8 +86,10 @@ void renderApplication() {
 	greenChannel += 0.01f;
 	if (greenChannel > 1.0f) greenChannel = 0.0f;
 	uint32_t imageIndex = 0;
-	VK(vkAcquireNextImageKHR(context->device, swapchain.swapchain, UINT64_MAX, 0, fence, &imageIndex));
+	VK(vkAcquireNextImageKHR(context->device, swapchain.swapchain, UINT64_MAX, acquireSemaphore, 0, &imageIndex));
 
+	VKA(vkWaitForFences(context->device, 1, &fence, VK_TRUE, UINT64_MAX));
+	VKA(vkResetFences(context->device, 1, &fence));
 	VKA(vkResetCommandPool(context->device, commandPool, 0));
 
 	VkCommandBufferBeginInfo beginInfo = { VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO };
@@ -102,20 +112,23 @@ void renderApplication() {
 	}
 	VKA(vkEndCommandBuffer(commandBuffer));
 
-	VKA(vkWaitForFences(context->device, 1, &fence, VK_TRUE, UINT64_MAX));
-	VKA(vkResetFences(context->device, 1, &fence));
-
 	VkSubmitInfo submitInfo = { VK_STRUCTURE_TYPE_SUBMIT_INFO };
 	submitInfo.commandBufferCount = 1;
 	submitInfo.pCommandBuffers = &commandBuffer;
-	VKA(vkQueueSubmit(context->graphicsQueue.queue, 1, &submitInfo, 0));
-
-	VKA(vkDeviceWaitIdle(context->device));
+	submitInfo.waitSemaphoreCount = 1;
+	submitInfo.pWaitSemaphores = &acquireSemaphore;
+	VkPipelineStageFlags waitMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+	submitInfo.pWaitDstStageMask = &waitMask;
+	submitInfo.signalSemaphoreCount = 1;
+	submitInfo.pSignalSemaphores = &releaseSemaphore;
+	VKA(vkQueueSubmit(context->graphicsQueue.queue, 1, &submitInfo, fence));
 
 	VkPresentInfoKHR presentInfo = { VK_STRUCTURE_TYPE_PRESENT_INFO_KHR };
 	presentInfo.swapchainCount = 1;
 	presentInfo.pSwapchains = &swapchain.swapchain;
 	presentInfo.pImageIndices = &imageIndex;
+	presentInfo.waitSemaphoreCount = 1;
+	presentInfo.pWaitSemaphores = &releaseSemaphore;
 	VK(vkQueuePresentKHR(context->graphicsQueue.queue, &presentInfo));
 }
 
