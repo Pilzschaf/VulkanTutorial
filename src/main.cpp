@@ -89,10 +89,13 @@ void renderApplication() {
 	if (greenChannel > 1.0f) greenChannel = 0.0f;
 	uint32_t imageIndex = 0;
 	static uint32_t frameIndex = 0;
-	VK(vkAcquireNextImageKHR(context->device, swapchain.swapchain, UINT64_MAX, acquireSemaphores[frameIndex], 0, &imageIndex));
 
+	// Wait for the n-2 frame to finish to be able to reuse its acquireSemaphore in vkAcquireNextImageKHR
 	VKA(vkWaitForFences(context->device, 1, &fences[frameIndex], VK_TRUE, UINT64_MAX));
 	VKA(vkResetFences(context->device, 1, &fences[frameIndex]));
+
+	VK(vkAcquireNextImageKHR(context->device, swapchain.swapchain, UINT64_MAX, acquireSemaphores[frameIndex], 0, &imageIndex));
+
 	VKA(vkResetCommandPool(context->device, commandPools[frameIndex], 0));
 
 	VkCommandBufferBeginInfo beginInfo = { VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO };
