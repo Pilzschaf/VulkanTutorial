@@ -5,17 +5,19 @@
 #include "logger.h"
 #include "vulkan_base/vulkan_base.h"
 
+#define FRAMES_IN_FLIGHT 2
+
 VulkanContext* context;
 VkSurfaceKHR surface;
 VulkanSwapchain swapchain;
 VkRenderPass renderPass;
 std::vector<VkFramebuffer> framebuffers;
 VulkanPipeline pipeline;
-VkCommandPool commandPool;
-VkCommandBuffer commandBuffer;
-VkFence fence;
-VkSemaphore acquireSemaphore;
-VkSemaphore releaseSemaphore;
+VkCommandPool commandPools[FRAMES_IN_FLIGHT];
+VkCommandBuffer commandBuffers[FRAMES_IN_FLIGHT];
+VkFence fences[FRAMES_IN_FLIGHT];
+VkSemaphore acquireSemaphores[FRAMES_IN_FLIGHT];
+VkSemaphore releaseSemaphores[FRAMES_IN_FLIGHT];
 
 bool handleMessage() {
 	SDL_Event event;
@@ -55,29 +57,29 @@ void initApplication(SDL_Window* window) {
 
 	pipeline = createPipeline(context, "../shaders/triangle_vert.spv", "../shaders/triangle_frag.spv", renderPass, swapchain.width, swapchain.height);
 
-	{
+	for(uint32_t i = 0; i < ARRAY_COUNT(fences); ++i) {
 		VkFenceCreateInfo createInfo = { VK_STRUCTURE_TYPE_FENCE_CREATE_INFO };
 		createInfo.flags = VK_FENCE_CREATE_SIGNALED_BIT;
-		VKA(vkCreateFence(context->device, &createInfo, 0, &fence));
+		VKA(vkCreateFence(context->device, &createInfo, 0, &fences[i]));
 	}
-	{
+	for(uint32_t i = 0; i < ARRAY_COUNT(acquireSemaphores); ++i) {
 		VkSemaphoreCreateInfo createInfo = { VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO };
-		VKA(vkCreateSemaphore(context->device, &createInfo, 0, &acquireSemaphore));
-		VKA(vkCreateSemaphore(context->device, &createInfo, 0, &releaseSemaphore));
+		VKA(vkCreateSemaphore(context->device, &createInfo, 0, &acquireSemaphores[i]));
+		VKA(vkCreateSemaphore(context->device, &createInfo, 0, &releaseSemaphores[i]));
 	}
 
-	{
+	for(uint32_t i = 0; i < ARRAY_COUNT(commandPools); ++i) {
 		VkCommandPoolCreateInfo createInfo = { VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO };
 		createInfo.flags = VK_COMMAND_POOL_CREATE_TRANSIENT_BIT;
 		createInfo.queueFamilyIndex = context->graphicsQueue.familyIndex;
-		VKA(vkCreateCommandPool(context->device, &createInfo, 0, &commandPool));
+		VKA(vkCreateCommandPool(context->device, &createInfo, 0, &commandPools[i]));
 	}
-	{
+	for(uint32_t i = 0; i < ARRAY_COUNT(commandPools); ++i) {
 		VkCommandBufferAllocateInfo allocateInfo = { VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO };
-		allocateInfo.commandPool = commandPool;
+		allocateInfo.commandPool = commandPools[i];
 		allocateInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
 		allocateInfo.commandBufferCount = 1;
-		VKA(vkAllocateCommandBuffers(context->device, &allocateInfo, &commandBuffer));
+		VKA(vkAllocateCommandBuffers(context->device, &allocateInfo, &commandBuffers[i]));
 	}
 }
 
@@ -86,16 +88,19 @@ void renderApplication() {
 	greenChannel += 0.01f;
 	if (greenChannel > 1.0f) greenChannel = 0.0f;
 	uint32_t imageIndex = 0;
-	VK(vkAcquireNextImageKHR(context->device, swapchain.swapchain, UINT64_MAX, acquireSemaphore, 0, &imageIndex));
+	static uint32_t frameIndex = 0;
+	VK(vkAcquireNextImageKHR(context->device, swapchain.swapchain, UINT64_MAX, acquireSemaphores[frameIndex], 0, &imageIndex));
 
-	VKA(vkWaitForFences(context->device, 1, &fence, VK_TRUE, UINT64_MAX));
-	VKA(vkResetFences(context->device, 1, &fence));
-	VKA(vkResetCommandPool(context->device, commandPool, 0));
+	VKA(vkWaitForFences(context->device, 1, &fences[frameIndex], VK_TRUE, UINT64_MAX));
+	VKA(vkResetFences(context->device, 1, &fences[frameIndex]));
+	VKA(vkResetCommandPool(context->device, commandPools[frameIndex], 0));
 
 	VkCommandBufferBeginInfo beginInfo = { VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO };
 	beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-	VKA(vkBeginCommandBuffer(commandBuffer, &beginInfo));
 	{
+		VkCommandBuffer commandBuffer = commandBuffers[frameIndex];
+		VKA(vkBeginCommandBuffer(commandBuffer, &beginInfo));
+
 		VkClearValue clearValue = {0.0f, greenChannel, 1.0f, 1.0f};
 		VkRenderPassBeginInfo beginInfo = { VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO };
 		beginInfo.renderPass = renderPass;
@@ -109,34 +114,43 @@ void renderApplication() {
 		vkCmdDraw(commandBuffer, 3, 1, 0, 0);
 
 		vkCmdEndRenderPass(commandBuffer);
-	}
-	VKA(vkEndCommandBuffer(commandBuffer));
 
+		VKA(vkEndCommandBuffer(commandBuffer));
+	}
+	
 	VkSubmitInfo submitInfo = { VK_STRUCTURE_TYPE_SUBMIT_INFO };
 	submitInfo.commandBufferCount = 1;
-	submitInfo.pCommandBuffers = &commandBuffer;
+	submitInfo.pCommandBuffers = &commandBuffers[frameIndex];
 	submitInfo.waitSemaphoreCount = 1;
-	submitInfo.pWaitSemaphores = &acquireSemaphore;
+	submitInfo.pWaitSemaphores = &acquireSemaphores[frameIndex];
 	VkPipelineStageFlags waitMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
 	submitInfo.pWaitDstStageMask = &waitMask;
 	submitInfo.signalSemaphoreCount = 1;
-	submitInfo.pSignalSemaphores = &releaseSemaphore;
-	VKA(vkQueueSubmit(context->graphicsQueue.queue, 1, &submitInfo, fence));
+	submitInfo.pSignalSemaphores = &releaseSemaphores[frameIndex];
+	VKA(vkQueueSubmit(context->graphicsQueue.queue, 1, &submitInfo, fences[frameIndex]));
 
 	VkPresentInfoKHR presentInfo = { VK_STRUCTURE_TYPE_PRESENT_INFO_KHR };
 	presentInfo.swapchainCount = 1;
 	presentInfo.pSwapchains = &swapchain.swapchain;
 	presentInfo.pImageIndices = &imageIndex;
 	presentInfo.waitSemaphoreCount = 1;
-	presentInfo.pWaitSemaphores = &releaseSemaphore;
+	presentInfo.pWaitSemaphores = &releaseSemaphores[frameIndex];
 	VK(vkQueuePresentKHR(context->graphicsQueue.queue, &presentInfo));
+
+	frameIndex = (frameIndex + 1) % FRAMES_IN_FLIGHT;
 }
 
 void shutdownApplication() {
 	VKA(vkDeviceWaitIdle(context->device));
 
-	VK(vkDestroyFence(context->device, fence, 0));
-	VK(vkDestroyCommandPool(context->device, commandPool, 0));
+	for(uint32_t i = 0; i < FRAMES_IN_FLIGHT; ++i) {
+		VK(vkDestroyFence(context->device, fences[i], 0));
+		VK(vkDestroySemaphore(context->device, acquireSemaphores[i], 0));
+		VK(vkDestroySemaphore(context->device, releaseSemaphores[i], 0));
+	}
+	for(uint32_t i = 0; i < ARRAY_COUNT(commandPools); ++i) {
+		VK(vkDestroyCommandPool(context->device, commandPools[i], 0));
+	}
 
 	destroyPipeline(context, &pipeline);
 
