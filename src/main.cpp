@@ -30,17 +30,14 @@ bool handleMessage() {
 	return true;
 }
 
-void initApplication(SDL_Window* window) {
-	uint32_t instanceExtensionCount;
-	SDL_Vulkan_GetInstanceExtensions(window, &instanceExtensionCount, 0);
-	const char** enabledInstanceExtensions = new const char* [instanceExtensionCount];
-	SDL_Vulkan_GetInstanceExtensions(window, &instanceExtensionCount, enabledInstanceExtensions);
-
-	const char* enabledDeviceExtensions[]{ VK_KHR_SWAPCHAIN_EXTENSION_NAME };
-	context = initVulkan(instanceExtensionCount, enabledInstanceExtensions, ARRAY_COUNT(enabledDeviceExtensions), enabledDeviceExtensions);
-	
-	SDL_Vulkan_CreateSurface(window, context->instance, &surface);
-	swapchain = createSwapchain(context, surface, VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT);
+void recreateRenderPass() {
+	if(renderPass) {
+		for (uint32_t i = 0; i < framebuffers.size(); ++i) {
+			VK(vkDestroyFramebuffer(context->device, framebuffers[i], 0));
+		}
+		destroyRenderpass(context, renderPass);
+	}
+	framebuffers.clear();
 
 	renderPass = createRenderPass(context, swapchain.format);
 	framebuffers.resize(swapchain.images.size());
@@ -54,6 +51,21 @@ void initApplication(SDL_Window* window) {
 		createInfo.layers = 1;
 		VKA(vkCreateFramebuffer(context->device, &createInfo, 0, &framebuffers[i]));
 	}
+}
+
+void initApplication(SDL_Window* window) {
+	uint32_t instanceExtensionCount;
+	SDL_Vulkan_GetInstanceExtensions(window, &instanceExtensionCount, 0);
+	const char** enabledInstanceExtensions = new const char* [instanceExtensionCount];
+	SDL_Vulkan_GetInstanceExtensions(window, &instanceExtensionCount, enabledInstanceExtensions);
+
+	const char* enabledDeviceExtensions[]{ VK_KHR_SWAPCHAIN_EXTENSION_NAME };
+	context = initVulkan(instanceExtensionCount, enabledInstanceExtensions, ARRAY_COUNT(enabledDeviceExtensions), enabledDeviceExtensions);
+	
+	SDL_Vulkan_CreateSurface(window, context->instance, &surface);
+	swapchain = createSwapchain(context, surface, VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT);
+
+	recreateRenderPass();
 
 	pipeline = createPipeline(context, "../shaders/triangle_vert.spv", "../shaders/triangle_frag.spv", renderPass, swapchain.width, swapchain.height);
 
@@ -83,6 +95,23 @@ void initApplication(SDL_Window* window) {
 	}
 }
 
+void recreateSwapchain() {
+	VulkanSwapchain oldSwapchain = swapchain;
+
+	VkSurfaceCapabilitiesKHR surfaceCapabilities;
+	VKA(vkGetPhysicalDeviceSurfaceCapabilitiesKHR(context->physicalDevice, surface, &surfaceCapabilities));
+	if(surfaceCapabilities.currentExtent.width == 0 || surfaceCapabilities.currentExtent.height == 0) {
+		return;
+	}
+
+
+	VKA(vkDeviceWaitIdle(context->device));
+	swapchain = createSwapchain(context, surface, VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT, &oldSwapchain);
+
+	destroySwapchain(context, &oldSwapchain);
+	recreateRenderPass();
+}
+
 void renderApplication() {
 	static float greenChannel = 0.0f;
 	greenChannel += 0.01f;
@@ -94,7 +123,14 @@ void renderApplication() {
 	VKA(vkWaitForFences(context->device, 1, &fences[frameIndex], VK_TRUE, UINT64_MAX));
 	VKA(vkResetFences(context->device, 1, &fences[frameIndex]));
 
-	VK(vkAcquireNextImageKHR(context->device, swapchain.swapchain, UINT64_MAX, acquireSemaphores[frameIndex], 0, &imageIndex));
+	VkResult result = VK(vkAcquireNextImageKHR(context->device, swapchain.swapchain, UINT64_MAX, acquireSemaphores[frameIndex], 0, &imageIndex));
+	if(result == VK_ERROR_OUT_OF_DATE_KHR || result == VK_SUBOPTIMAL_KHR) {
+		// Swapchain is out of date
+		recreateSwapchain();
+		return;
+	} else {
+		ASSERT_VULKAN(result);
+	}
 
 	VKA(vkResetCommandPool(context->device, commandPools[frameIndex], 0));
 
@@ -103,6 +139,11 @@ void renderApplication() {
 	{
 		VkCommandBuffer commandBuffer = commandBuffers[frameIndex];
 		VKA(vkBeginCommandBuffer(commandBuffer, &beginInfo));
+
+		VkViewport viewport = { 0.0f, 0.0f, (float)swapchain.width, (float)swapchain.height };
+		VkRect2D scissor = { {0, 0}, {swapchain.width, swapchain.height} };
+		vkCmdSetViewport(commandBuffer, 0, 1, &viewport);
+		vkCmdSetScissor(commandBuffer, 0, 1, &scissor);
 
 		VkClearValue clearValue = {0.0f, greenChannel, 1.0f, 1.0f};
 		VkRenderPassBeginInfo beginInfo = { VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO };
@@ -114,6 +155,7 @@ void renderApplication() {
 		vkCmdBeginRenderPass(commandBuffer, &beginInfo, VK_SUBPASS_CONTENTS_INLINE);
 
 		vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline.pipeline);
+
 		vkCmdDraw(commandBuffer, 3, 1, 0, 0);
 
 		vkCmdEndRenderPass(commandBuffer);
@@ -138,7 +180,13 @@ void renderApplication() {
 	presentInfo.pImageIndices = &imageIndex;
 	presentInfo.waitSemaphoreCount = 1;
 	presentInfo.pWaitSemaphores = &releaseSemaphores[frameIndex];
-	VK(vkQueuePresentKHR(context->graphicsQueue.queue, &presentInfo));
+	result = VK(vkQueuePresentKHR(context->graphicsQueue.queue, &presentInfo));
+	if(result == VK_ERROR_OUT_OF_DATE_KHR || result == VK_SUBOPTIMAL_KHR) {
+		// Swapchain is out of date
+		recreateSwapchain();
+	} else {
+		ASSERT_VULKAN(result);
+	}
 
 	frameIndex = (frameIndex + 1) % FRAMES_IN_FLIGHT;
 }
@@ -173,7 +221,7 @@ int main() {
 		return 1;
 	}
 
-	SDL_Window* window = SDL_CreateWindow("Vulkan Tutorial", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, 1240, 720, SDL_WINDOW_VULKAN);
+	SDL_Window* window = SDL_CreateWindow("Vulkan Tutorial", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, 1240, 720, SDL_WINDOW_VULKAN | SDL_WINDOW_RESIZABLE);
 	if (!window) {
 		LOG_ERROR("Error creating SDL window");
 		return 1;

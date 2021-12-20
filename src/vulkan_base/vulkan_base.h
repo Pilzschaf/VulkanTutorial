@@ -44,7 +44,7 @@ struct VulkanContext {
 VulkanContext* initVulkan(uint32_t instanceExtensionCount, const char** instanceExtensions, uint32_t deviceExtensionCount, const char** deviceExtensions);
 void exitVulkan(VulkanContext* context);
 
-VulkanSwapchain createSwapchain(VulkanContext* context, VkSurfaceKHR surface, VkImageUsageFlags usage);
+VulkanSwapchain createSwapchain(VulkanContext* context, VkSurfaceKHR surface, VkImageUsageFlags usage, VulkanSwapchain* oldSwapchain = 0);
 void destroySwapchain(VulkanContext* context, VulkanSwapchain* swapchain);
 
 VkRenderPass createRenderPass(VulkanContext* context, VkFormat format);

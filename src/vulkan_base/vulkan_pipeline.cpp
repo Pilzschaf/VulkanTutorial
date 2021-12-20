@@ -48,11 +48,11 @@ VulkanPipeline createPipeline(VulkanContext* context, const char* vertexShaderFi
 
 	VkPipelineViewportStateCreateInfo viewportState = { VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO };
 	viewportState.viewportCount = 1;
-	VkViewport viewport = { 0.0f, 0.0f, (float)width, (float)height };
-	viewportState.pViewports = &viewport;
+	//VkViewport viewport = { 0.0f, 0.0f, (float)width, (float)height };
+	//viewportState.pViewports = &viewport;
 	viewportState.scissorCount = 1;
-	VkRect2D scissor = { {0, 0}, {width, height} };
-	viewportState.pScissors = &scissor;
+	//VkRect2D scissor = { {0, 0}, {width, height} };
+	//viewportState.pScissors = &scissor;
 
 	VkPipelineRasterizationStateCreateInfo rasterizationState = { VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO };
 	rasterizationState.lineWidth = 1.0f;
@@ -66,6 +66,11 @@ VulkanPipeline createPipeline(VulkanContext* context, const char* vertexShaderFi
 	VkPipelineColorBlendStateCreateInfo colorBlendState = { VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO };
 	colorBlendState.attachmentCount = 1;
 	colorBlendState.pAttachments = &colorBlendAttachment;
+
+	VkPipelineDynamicStateCreateInfo dynamicState = {VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO};
+	VkDynamicState dynamicStates[] = {VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR};
+	dynamicState.dynamicStateCount = ARRAY_COUNT(dynamicStates);
+	dynamicState.pDynamicStates = dynamicStates;
 
 	VkPipelineLayout pipelineLayout;
 	{
@@ -84,6 +89,7 @@ VulkanPipeline createPipeline(VulkanContext* context, const char* vertexShaderFi
 		createInfo.pRasterizationState = &rasterizationState;
 		createInfo.pMultisampleState = &multisampleState;
 		createInfo.pColorBlendState = &colorBlendState;
+		createInfo.pDynamicState = &dynamicState;
 		createInfo.layout = pipelineLayout;
 		createInfo.renderPass = renderPass;
 		createInfo.subpass = 0;

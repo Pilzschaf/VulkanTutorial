@@ -1,6 +1,6 @@
 #include "vulkan_base.h"
 
-VulkanSwapchain createSwapchain(VulkanContext* context, VkSurfaceKHR surface, VkImageUsageFlags usage) {
+VulkanSwapchain createSwapchain(VulkanContext* context, VkSurfaceKHR surface, VkImageUsageFlags usage, VulkanSwapchain* oldSwapchain) {
 	VulkanSwapchain result = {};
 
 	VkBool32 supportsPresent = 0;
@@ -48,6 +48,7 @@ VulkanSwapchain createSwapchain(VulkanContext* context, VkSurfaceKHR surface, Vk
 	createInfo.preTransform = VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR;
 	createInfo.compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
 	createInfo.presentMode = VK_PRESENT_MODE_FIFO_KHR;
+	createInfo.oldSwapchain = oldSwapchain ? oldSwapchain->swapchain : 0;
 	VKA(vkCreateSwapchainKHR(context->device, &createInfo, 0, &result.swapchain));
 
 	result.format = format;
