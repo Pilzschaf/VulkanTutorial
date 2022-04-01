@@ -41,6 +41,11 @@ struct VulkanContext {
 	VulkanQueue graphicsQueue;
 };
 
+struct VulkanBuffer {
+	VkBuffer buffer;
+	VkDeviceMemory memory;
+};
+
 VulkanContext* initVulkan(uint32_t instanceExtensionCount, const char** instanceExtensions, uint32_t deviceExtensionCount, const char** deviceExtensions);
 void exitVulkan(VulkanContext* context);
 
@@ -50,5 +55,8 @@ void destroySwapchain(VulkanContext* context, VulkanSwapchain* swapchain);
 VkRenderPass createRenderPass(VulkanContext* context, VkFormat format);
 void destroyRenderpass(VulkanContext* context, VkRenderPass renderPass);
 
-VulkanPipeline createPipeline(VulkanContext* context, const char* vertexShaderFilename, const char* fragmentShaderFilename, VkRenderPass renderPass, uint32_t width, uint32_t height);
+void createBuffer(VulkanContext* context, VulkanBuffer* buffer, uint64_t size, VkBufferUsageFlags usage, VkMemoryPropertyFlags memoryProperties);
+void destroyBuffer(VulkanContext* context, VulkanBuffer* buffer);
+
+VulkanPipeline createPipeline(VulkanContext* context, const char* vertexShaderFilename, const char* fragmentShaderFilename, VkRenderPass renderPass, uint32_t width, uint32_t height, VkVertexInputAttributeDescription* attributes, uint32_t numAttributes, VkVertexInputBindingDescription* binding);
 void destroyPipeline(VulkanContext* context, VulkanPipeline* pipeline);

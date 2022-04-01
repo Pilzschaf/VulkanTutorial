@@ -18,6 +18,7 @@ VkCommandBuffer commandBuffers[FRAMES_IN_FLIGHT];
 VkFence fences[FRAMES_IN_FLIGHT];
 VkSemaphore acquireSemaphores[FRAMES_IN_FLIGHT];
 VkSemaphore releaseSemaphores[FRAMES_IN_FLIGHT];
+VulkanBuffer vertexBuffer;
 
 bool handleMessage() {
 	SDL_Event event;
@@ -53,6 +54,17 @@ void recreateRenderPass() {
 	}
 }
 
+float vertexData[] = {
+	0.0f, -0.5f,
+	1.0f, 0.0f, 0.0f,
+
+	0.5f, 0.5f,
+	0.0f, 1.0f, 0.0f,
+
+	-0.5f, 0.5f,
+	0.0f, 0.0f, 1.0f,
+};
+
 void initApplication(SDL_Window* window) {
 	uint32_t instanceExtensionCount;
 	SDL_Vulkan_GetInstanceExtensions(window, &instanceExtensionCount, 0);
@@ -67,7 +79,20 @@ void initApplication(SDL_Window* window) {
 
 	recreateRenderPass();
 
-	pipeline = createPipeline(context, "../shaders/triangle_vert.spv", "../shaders/triangle_frag.spv", renderPass, swapchain.width, swapchain.height);
+	VkVertexInputAttributeDescription vertexAttributeDescriptions[2] = {};
+	vertexAttributeDescriptions[0].binding = 0;
+	vertexAttributeDescriptions[0].location = 0;
+	vertexAttributeDescriptions[0].format = VK_FORMAT_R32G32_SFLOAT;
+	vertexAttributeDescriptions[0].offset = 0;
+	vertexAttributeDescriptions[1].binding = 0;
+	vertexAttributeDescriptions[1].location = 1;
+	vertexAttributeDescriptions[1].format = VK_FORMAT_R32G32B32_SFLOAT;
+	vertexAttributeDescriptions[1].offset = sizeof(float) * 2;
+	VkVertexInputBindingDescription vertexInputBinding = {};
+	vertexInputBinding.binding = 0;
+	vertexInputBinding.inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
+	vertexInputBinding.stride = sizeof(float) * 5;
+	pipeline = createPipeline(context, "../shaders/color_vert.spv", "../shaders/color_frag.spv", renderPass, swapchain.width, swapchain.height, vertexAttributeDescriptions, ARRAY_COUNT(vertexAttributeDescriptions), &vertexInputBinding);
 
 	for(uint32_t i = 0; i < ARRAY_COUNT(fences); ++i) {
 		VkFenceCreateInfo createInfo = { VK_STRUCTURE_TYPE_FENCE_CREATE_INFO };
@@ -93,6 +118,12 @@ void initApplication(SDL_Window* window) {
 		allocateInfo.commandBufferCount = 1;
 		VKA(vkAllocateCommandBuffers(context->device, &allocateInfo, &commandBuffers[i]));
 	}
+
+	createBuffer(context, &vertexBuffer, sizeof(vertexData), VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT);
+	void* data;
+	VKA(vkMapMemory(context->device, vertexBuffer.memory, 0, sizeof(vertexData), 0, &data));
+	memcpy(data, vertexData, sizeof(vertexData));
+	VK(vkUnmapMemory(context->device, vertexBuffer.memory));
 }
 
 void recreateSwapchain() {
@@ -121,7 +152,6 @@ void renderApplication() {
 
 	// Wait for the n-2 frame to finish to be able to reuse its acquireSemaphore in vkAcquireNextImageKHR
 	VKA(vkWaitForFences(context->device, 1, &fences[frameIndex], VK_TRUE, UINT64_MAX));
-	VKA(vkResetFences(context->device, 1, &fences[frameIndex]));
 
 	VkResult result = VK(vkAcquireNextImageKHR(context->device, swapchain.swapchain, UINT64_MAX, acquireSemaphores[frameIndex], 0, &imageIndex));
 	if(result == VK_ERROR_OUT_OF_DATE_KHR || result == VK_SUBOPTIMAL_KHR) {
@@ -129,6 +159,7 @@ void renderApplication() {
 		recreateSwapchain();
 		return;
 	} else {
+		VKA(vkResetFences(context->device, 1, &fences[frameIndex]));
 		ASSERT_VULKAN(result);
 	}
 
@@ -155,6 +186,9 @@ void renderApplication() {
 		vkCmdBeginRenderPass(commandBuffer, &beginInfo, VK_SUBPASS_CONTENTS_INLINE);
 
 		vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline.pipeline);
+
+		VkDeviceSize offset = 0;
+		vkCmdBindVertexBuffers(commandBuffer, 0, 1, &vertexBuffer.buffer, &offset);
 
 		vkCmdDraw(commandBuffer, 3, 1, 0, 0);
 
@@ -193,6 +227,8 @@ void renderApplication() {
 
 void shutdownApplication() {
 	VKA(vkDeviceWaitIdle(context->device));
+
+	destroyBuffer(context, &vertexBuffer);
 
 	for(uint32_t i = 0; i < FRAMES_IN_FLIGHT; ++i) {
 		VK(vkDestroyFence(context->device, fences[i], 0));

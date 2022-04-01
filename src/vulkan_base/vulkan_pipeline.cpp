@@ -27,7 +27,7 @@ VkShaderModule createShaderModule(VulkanContext* context, const char* shaderFile
 	return result;
 }
 
-VulkanPipeline createPipeline(VulkanContext* context, const char* vertexShaderFilename, const char* fragmentShaderFilename, VkRenderPass renderPass, uint32_t width, uint32_t height) {
+VulkanPipeline createPipeline(VulkanContext* context, const char* vertexShaderFilename, const char* fragmentShaderFilename, VkRenderPass renderPass, uint32_t width, uint32_t height, VkVertexInputAttributeDescription* attributes, uint32_t numAttributes, VkVertexInputBindingDescription* binding) {
 	VkShaderModule vertexShaderModule = createShaderModule(context, vertexShaderFilename);
 	VkShaderModule fragmentShaderModule = createShaderModule(context, fragmentShaderFilename);
 
@@ -42,6 +42,10 @@ VulkanPipeline createPipeline(VulkanContext* context, const char* vertexShaderFi
 	shaderStages[1].pName = "main";
 
 	VkPipelineVertexInputStateCreateInfo vertexInputState = { VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO };
+	vertexInputState.vertexBindingDescriptionCount = binding ? 1 : 0;
+	vertexInputState.pVertexBindingDescriptions = binding;
+	vertexInputState.vertexAttributeDescriptionCount = numAttributes;
+	vertexInputState.pVertexAttributeDescriptions = attributes;
 
 	VkPipelineInputAssemblyStateCreateInfo inputAssemblyState = { VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO };
 	inputAssemblyState.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
