@@ -19,6 +19,7 @@ VkFence fences[FRAMES_IN_FLIGHT];
 VkSemaphore acquireSemaphores[FRAMES_IN_FLIGHT];
 VkSemaphore releaseSemaphores[FRAMES_IN_FLIGHT];
 VulkanBuffer vertexBuffer;
+VulkanBuffer indexBuffer;
 
 bool handleMessage() {
 	SDL_Event event;
@@ -55,7 +56,7 @@ void recreateRenderPass() {
 }
 
 float vertexData[] = {
-	0.0f, -0.5f,
+	0.5f, -0.5f,
 	1.0f, 0.0f, 0.0f,
 
 	0.5f, 0.5f,
@@ -63,6 +64,14 @@ float vertexData[] = {
 
 	-0.5f, 0.5f,
 	0.0f, 0.0f, 1.0f,
+
+	-0.5f, -0.5f,
+	0.0f, 1.0f, 0.0f,
+};
+
+uint32_t indexData[] = {
+	0, 1, 2,
+	3, 0, 2,
 };
 
 void initApplication(SDL_Window* window) {
@@ -124,6 +133,11 @@ void initApplication(SDL_Window* window) {
 	VKA(vkMapMemory(context->device, vertexBuffer.memory, 0, sizeof(vertexData), 0, &data));
 	memcpy(data, vertexData, sizeof(vertexData));
 	VK(vkUnmapMemory(context->device, vertexBuffer.memory));
+
+	createBuffer(context, &indexBuffer, sizeof(indexData), VK_BUFFER_USAGE_INDEX_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT);
+	VKA(vkMapMemory(context->device, indexBuffer.memory, 0, sizeof(indexData), 0, &data));
+	memcpy(data, indexData, sizeof(indexData));
+	VK(vkUnmapMemory(context->device, indexBuffer.memory));
 }
 
 void recreateSwapchain() {
@@ -189,8 +203,9 @@ void renderApplication() {
 
 		VkDeviceSize offset = 0;
 		vkCmdBindVertexBuffers(commandBuffer, 0, 1, &vertexBuffer.buffer, &offset);
+		vkCmdBindIndexBuffer(commandBuffer, indexBuffer.buffer, 0, VK_INDEX_TYPE_UINT32);
 
-		vkCmdDraw(commandBuffer, 3, 1, 0, 0);
+		vkCmdDrawIndexed(commandBuffer, ARRAY_COUNT(indexData), 1, 0, 0, 0);
 
 		vkCmdEndRenderPass(commandBuffer);
 
@@ -229,6 +244,7 @@ void shutdownApplication() {
 	VKA(vkDeviceWaitIdle(context->device));
 
 	destroyBuffer(context, &vertexBuffer);
+	destroyBuffer(context, &indexBuffer);
 
 	for(uint32_t i = 0; i < FRAMES_IN_FLIGHT; ++i) {
 		VK(vkDestroyFence(context->device, fences[i], 0));
