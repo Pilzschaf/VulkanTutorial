@@ -75,10 +75,17 @@ uint32_t indexData[] = {
 };
 
 void initApplication(SDL_Window* window) {
+	const char* additionalInstanceExtensions[] = {
+		VK_EXT_DEBUG_UTILS_EXTENSION_NAME,
+		VK_EXT_VALIDATION_FEATURES_EXTENSION_NAME,
+	};
 	uint32_t instanceExtensionCount;
 	SDL_Vulkan_GetInstanceExtensions(window, &instanceExtensionCount, 0);
-	const char** enabledInstanceExtensions = new const char* [instanceExtensionCount];
+	const char** enabledInstanceExtensions = new const char* [instanceExtensionCount + ARRAY_COUNT(additionalInstanceExtensions)];
 	SDL_Vulkan_GetInstanceExtensions(window, &instanceExtensionCount, enabledInstanceExtensions);
+	for (uint32_t i = 0; i < ARRAY_COUNT(additionalInstanceExtensions); ++i) {
+		enabledInstanceExtensions[instanceExtensionCount++] = additionalInstanceExtensions[i];
+	}
 
 	const char* enabledDeviceExtensions[]{ VK_KHR_SWAPCHAIN_EXTENSION_NAME };
 	context = initVulkan(instanceExtensionCount, enabledInstanceExtensions, ARRAY_COUNT(enabledDeviceExtensions), enabledDeviceExtensions);

@@ -1,5 +1,28 @@
 #include "vulkan_base.h"
 
+VkBool32 VKAPI_CALL debugReportCallback(VkDebugUtilsMessageSeverityFlagBitsEXT severity, VkDebugUtilsMessageTypeFlagsEXT messageTypes, const VkDebugUtilsMessengerCallbackDataEXT* callbackData, void* userData) {
+	if (severity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT) {
+		LOG_ERROR(callbackData->pMessage);
+	} else {
+		LOG_WARN(callbackData->pMessage);
+	}
+	return VK_FALSE;
+}
+
+VkDebugUtilsMessengerEXT registerDebugCallback(VkInstance instance) {
+	PFN_vkCreateDebugUtilsMessengerEXT pfnCreateDebutUtilsMessengerEXT;
+	pfnCreateDebutUtilsMessengerEXT = (PFN_vkCreateDebugUtilsMessengerEXT)vkGetInstanceProcAddr(instance, "vkCreateDebugUtilsMessengerEXT");
+	VkDebugUtilsMessengerCreateInfoEXT callbackInfo = { VK_STRUCTURE_TYPE_DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT };
+	callbackInfo.messageSeverity = VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT;
+	callbackInfo.messageType = VK_DEBUG_UTILS_MESSAGE_TYPE_GENERAL_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_TYPE_PERFORMANCE_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT;
+	callbackInfo.pfnUserCallback = debugReportCallback;
+
+	VkDebugUtilsMessengerEXT callback = 0;
+	VKA(pfnCreateDebutUtilsMessengerEXT(instance, &callbackInfo, 0, &callback));
+
+	return callback;
+}
+
 bool initVulkanInstance(VulkanContext* context, uint32_t instanceExtensionCount, const char** instanceExtensions) {
 	uint32_t layerPropertyCount = 0;
 	VKA(vkEnumerateInstanceLayerProperties(&layerPropertyCount, 0));
@@ -17,6 +40,15 @@ bool initVulkanInstance(VulkanContext* context, uint32_t instanceExtensionCount,
 		"VK_LAYER_KHRONOS_validation",
 	};
 
+	VkValidationFeatureEnableEXT enableValidationFeatures[] = {
+		//VK_VALIDATION_FEATURE_ENABLE_BEST_PRACTICES_EXT,
+		VK_VALIDATION_FEATURE_ENABLE_GPU_ASSISTED_EXT,
+		VK_VALIDATION_FEATURE_ENABLE_SYNCHRONIZATION_VALIDATION_EXT,
+	};
+	VkValidationFeaturesEXT validationFeatures = { VK_STRUCTURE_TYPE_VALIDATION_FEATURES_EXT };
+	validationFeatures.enabledValidationFeatureCount = ARRAY_COUNT(enableValidationFeatures);
+	validationFeatures.pEnabledValidationFeatures = enableValidationFeatures;
+
 #ifdef VULKAN_INFO_OUTPUT
 	uint32_t availableInstanceExtensionCount;
 	VKA(vkEnumerateInstanceExtensionProperties(0, &availableInstanceExtensionCount, 0));
@@ -31,9 +63,10 @@ bool initVulkanInstance(VulkanContext* context, uint32_t instanceExtensionCount,
 	VkApplicationInfo applicationInfo = {VK_STRUCTURE_TYPE_APPLICATION_INFO};
 	applicationInfo.pApplicationName = "Vulkan Tutorial";
 	applicationInfo.applicationVersion = VK_MAKE_VERSION(0, 0, 1); // 0.0.1
-	applicationInfo.apiVersion = VK_API_VERSION_1_2;
+	applicationInfo.apiVersion = VK_API_VERSION_1_0;
 	
 	VkInstanceCreateInfo createInfo = { VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO };
+	createInfo.pNext = &validationFeatures;
 	createInfo.pApplicationInfo = &applicationInfo;
 	createInfo.enabledLayerCount = ARRAY_COUNT(enabledLayers);
 	createInfo.ppEnabledLayerNames = enabledLayers;
@@ -44,6 +77,8 @@ bool initVulkanInstance(VulkanContext* context, uint32_t instanceExtensionCount,
 		LOG_ERROR("Error creating vulkan instance");
 		return false;
 	}
+
+	context->debugCallback = registerDebugCallback(context->instance);
 
 	return true;
 }
@@ -152,5 +187,11 @@ void exitVulkan(VulkanContext* context) {
 	VKA(vkDeviceWaitIdle(context->device));
 	VK(vkDestroyDevice(context->device, 0));
 
+	if (context->debugCallback) {
+		PFN_vkDestroyDebugUtilsMessengerEXT pfnDestroyDebugUtilsMessengerEXT;
+		pfnDestroyDebugUtilsMessengerEXT = (PFN_vkDestroyDebugUtilsMessengerEXT)vkGetInstanceProcAddr(context->instance, "vkDestroyDebugUtilsMessengerEXT");
+		pfnDestroyDebugUtilsMessengerEXT(context->instance, context->debugCallback, 0);
+		context->debugCallback = 0;
+	}
 	vkDestroyInstance(context->instance, 0);
 }
