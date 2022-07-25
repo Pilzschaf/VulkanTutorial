@@ -56,6 +56,7 @@ VkRenderPass createRenderPass(VulkanContext* context, VkFormat format);
 void destroyRenderpass(VulkanContext* context, VkRenderPass renderPass);
 
 void createBuffer(VulkanContext* context, VulkanBuffer* buffer, uint64_t size, VkBufferUsageFlags usage, VkMemoryPropertyFlags memoryProperties);
+void uploadDataToBuffer(VulkanContext* context, VulkanBuffer* buffer, void* data, size_t size);
 void destroyBuffer(VulkanContext* context, VulkanBuffer* buffer);
 
 VulkanPipeline createPipeline(VulkanContext* context, const char* vertexShaderFilename, const char* fragmentShaderFilename, VkRenderPass renderPass, uint32_t width, uint32_t height, VkVertexInputAttributeDescription* attributes, uint32_t numAttributes, VkVertexInputBindingDescription* binding);

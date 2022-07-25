@@ -128,16 +128,11 @@ void initApplication(SDL_Window* window) {
 		VKA(vkAllocateCommandBuffers(context->device, &allocateInfo, &commandBuffers[i]));
 	}
 
-	createBuffer(context, &vertexBuffer, sizeof(vertexData), VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT);
-	void* data;
-	VKA(vkMapMemory(context->device, vertexBuffer.memory, 0, sizeof(vertexData), 0, &data));
-	memcpy(data, vertexData, sizeof(vertexData));
-	VK(vkUnmapMemory(context->device, vertexBuffer.memory));
-
-	createBuffer(context, &indexBuffer, sizeof(indexData), VK_BUFFER_USAGE_INDEX_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT);
-	VKA(vkMapMemory(context->device, indexBuffer.memory, 0, sizeof(indexData), 0, &data));
-	memcpy(data, indexData, sizeof(indexData));
-	VK(vkUnmapMemory(context->device, indexBuffer.memory));
+	createBuffer(context, &vertexBuffer, sizeof(vertexData), VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+	uploadDataToBuffer(context, &vertexBuffer, vertexData, sizeof(vertexData));
+	
+	createBuffer(context, &indexBuffer, sizeof(indexData), VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+	uploadDataToBuffer(context, &indexBuffer, indexData, sizeof(indexData));
 }
 
 void recreateSwapchain() {
