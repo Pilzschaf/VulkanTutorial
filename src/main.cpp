@@ -2,6 +2,9 @@
 #include <SDL.h>
 #include <SDL_vulkan.h>
 
+#define STB_IMAGE_IMPLEMENTATION
+#include <stb/stb_image.h>
+
 #include "logger.h"
 #include "vulkan_base/vulkan_base.h"
 
@@ -20,6 +23,7 @@ VkSemaphore acquireSemaphores[FRAMES_IN_FLIGHT];
 VkSemaphore releaseSemaphores[FRAMES_IN_FLIGHT];
 VulkanBuffer vertexBuffer;
 VulkanBuffer indexBuffer;
+VulkanImage image;
 
 bool handleMessage() {
 	SDL_Event event;
@@ -140,6 +144,17 @@ void initApplication(SDL_Window* window) {
 	
 	createBuffer(context, &indexBuffer, sizeof(indexData), VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
 	uploadDataToBuffer(context, &indexBuffer, indexData, sizeof(indexData));
+
+	{
+		int width, height, channels;
+		uint8_t* data = stbi_load("../data/images/logo.png", &width, &height, &channels, 4);
+		if(!data) {
+			LOG_ERROR("Could not load image data");
+		}
+		createImage(context, &image, width, height, VK_FORMAT_R8G8B8A8_UNORM, VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT);
+		uploadDataToImage(context, &image, data, width * height * 4, width, height, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT);
+		stbi_image_free(data);
+	}
 }
 
 void recreateSwapchain() {
@@ -247,6 +262,8 @@ void shutdownApplication() {
 
 	destroyBuffer(context, &vertexBuffer);
 	destroyBuffer(context, &indexBuffer);
+
+	destroyImage(context, &image);
 
 	for(uint32_t i = 0; i < FRAMES_IN_FLIGHT; ++i) {
 		VK(vkDestroyFence(context->device, fences[i], 0));

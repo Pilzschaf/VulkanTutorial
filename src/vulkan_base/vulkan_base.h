@@ -47,6 +47,12 @@ struct VulkanBuffer {
 	VkDeviceMemory memory;
 };
 
+struct VulkanImage {
+	VkImage image;
+	VkImageView view;
+	VkDeviceMemory memory;
+};
+
 VulkanContext* initVulkan(uint32_t instanceExtensionCount, const char** instanceExtensions, uint32_t deviceExtensionCount, const char** deviceExtensions);
 void exitVulkan(VulkanContext* context);
 
@@ -59,6 +65,10 @@ void destroyRenderpass(VulkanContext* context, VkRenderPass renderPass);
 void createBuffer(VulkanContext* context, VulkanBuffer* buffer, uint64_t size, VkBufferUsageFlags usage, VkMemoryPropertyFlags memoryProperties);
 void uploadDataToBuffer(VulkanContext* context, VulkanBuffer* buffer, void* data, size_t size);
 void destroyBuffer(VulkanContext* context, VulkanBuffer* buffer);
+
+void createImage(VulkanContext* context, VulkanImage* image, uint32_t width, uint32_t height, VkFormat format, VkImageUsageFlags usage);
+void uploadDataToImage(VulkanContext* context, VulkanImage* image, void* data, size_t size, uint32_t width, uint32_t height, VkImageLayout finalLayout, VkAccessFlags dstAccessMask);
+void destroyImage(VulkanContext* context, VulkanImage* image);
 
 VulkanPipeline createPipeline(VulkanContext* context, const char* vertexShaderFilename, const char* fragmentShaderFilename, VkRenderPass renderPass, uint32_t width, uint32_t height, VkVertexInputAttributeDescription* attributes, uint32_t numAttributes, VkVertexInputBindingDescription* binding);
 void destroyPipeline(VulkanContext* context, VulkanPipeline* pipeline);
