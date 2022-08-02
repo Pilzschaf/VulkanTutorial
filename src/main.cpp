@@ -25,6 +25,11 @@ VulkanBuffer vertexBuffer;
 VulkanBuffer indexBuffer;
 VulkanImage image;
 
+VkSampler sampler;
+VkDescriptorPool descriptorPool;
+VkDescriptorSet descriptorSet;
+VkDescriptorSetLayout descriptorLayout;
+
 bool handleMessage() {
 	SDL_Event event;
 	while (SDL_PollEvent(&event)) {
@@ -60,17 +65,21 @@ void recreateRenderPass() {
 }
 
 float vertexData[] = {
-	0.5f, -0.5f,
-	1.0f, 0.0f, 0.0f,
+	0.5f, -0.5f,		// Position
+	1.0f, 0.0f, 0.0f,	// Color
+	1.0f, 0.0f,			// Texcoord
 
 	0.5f, 0.5f,
 	0.0f, 1.0f, 0.0f,
+	1.0f, 1.0f,
 
 	-0.5f, 0.5f,
 	0.0f, 0.0f, 1.0f,
+	0.0f, 1.0f,
 
 	-0.5f, -0.5f,
 	0.0f, 1.0f, 0.0f,
+	0.0f, 0.0f,
 };
 
 uint32_t indexData[] = {
@@ -99,7 +108,70 @@ void initApplication(SDL_Window* window) {
 
 	recreateRenderPass();
 
-	VkVertexInputAttributeDescription vertexAttributeDescriptions[2] = {};
+	{
+		VkSamplerCreateInfo createInfo = {VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO};
+		createInfo.magFilter = VK_FILTER_NEAREST;
+		createInfo.minFilter = VK_FILTER_NEAREST;
+		createInfo.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR;
+		createInfo.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+		createInfo.addressModeV = createInfo.addressModeU;
+		createInfo.addressModeW = createInfo.addressModeU;
+		createInfo.mipLodBias = 0.0f;
+		createInfo.maxAnisotropy = 1.0f;
+		createInfo.minLod = 0.0f;
+		createInfo.maxLod = 1.0f;
+		VKA(vkCreateSampler(context->device, &createInfo, 0, &sampler));
+	}
+
+	{
+		int width, height, channels;
+		uint8_t* data = stbi_load("../data/images/logo.png", &width, &height, &channels, 4);
+		if(!data) {
+			LOG_ERROR("Could not load image data");
+		}
+		createImage(context, &image, width, height, VK_FORMAT_R8G8B8A8_UNORM, VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT);
+		uploadDataToImage(context, &image, data, width * height * 4, width, height, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT);
+		stbi_image_free(data);
+	}
+
+	{
+		VkDescriptorPoolSize poolSizes[] = {
+			{VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1},
+		};
+		VkDescriptorPoolCreateInfo createInfo = {VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO};
+		createInfo.maxSets = 1;
+		createInfo.poolSizeCount = ARRAY_COUNT(poolSizes);
+		createInfo.pPoolSizes = poolSizes;
+		VKA(vkCreateDescriptorPool(context->device, &createInfo, 0, &descriptorPool));
+	}
+
+	{
+		VkDescriptorSetLayoutBinding bindings[] = {
+			{0, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1, VK_SHADER_STAGE_FRAGMENT_BIT, 0},
+		};
+		VkDescriptorSetLayoutCreateInfo createInfo = {VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO};
+		createInfo.bindingCount = ARRAY_COUNT(bindings);
+		createInfo.pBindings = bindings;
+		VKA(vkCreateDescriptorSetLayout(context->device, &createInfo, 0, &descriptorLayout));
+
+		VkDescriptorSetAllocateInfo allocateInfo = {VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO};
+		allocateInfo.descriptorPool = descriptorPool;
+		allocateInfo.descriptorSetCount = 1;
+		allocateInfo.pSetLayouts = &descriptorLayout;
+		VKA(vkAllocateDescriptorSets(context->device, &allocateInfo, &descriptorSet));
+
+		VkDescriptorImageInfo imageInfo = { sampler, image.view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
+		VkWriteDescriptorSet descriptorWrites[1];
+		descriptorWrites[0] = {VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET};
+		descriptorWrites[0].dstSet = descriptorSet;
+		descriptorWrites[0].dstBinding = 0;
+		descriptorWrites[0].descriptorCount = 1;
+		descriptorWrites[0].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+		descriptorWrites[0].pImageInfo = &imageInfo;
+		VK(vkUpdateDescriptorSets(context->device, ARRAY_COUNT(descriptorWrites), descriptorWrites, 0, 0));
+	}
+
+	VkVertexInputAttributeDescription vertexAttributeDescriptions[3] = {};
 	vertexAttributeDescriptions[0].binding = 0;
 	vertexAttributeDescriptions[0].location = 0;
 	vertexAttributeDescriptions[0].format = VK_FORMAT_R32G32_SFLOAT;
@@ -108,11 +180,15 @@ void initApplication(SDL_Window* window) {
 	vertexAttributeDescriptions[1].location = 1;
 	vertexAttributeDescriptions[1].format = VK_FORMAT_R32G32B32_SFLOAT;
 	vertexAttributeDescriptions[1].offset = sizeof(float) * 2;
+	vertexAttributeDescriptions[2].binding = 0;
+	vertexAttributeDescriptions[2].location = 2;
+	vertexAttributeDescriptions[2].format = VK_FORMAT_R32G32_SFLOAT;
+	vertexAttributeDescriptions[2].offset = sizeof(float) * 5;
 	VkVertexInputBindingDescription vertexInputBinding = {};
 	vertexInputBinding.binding = 0;
 	vertexInputBinding.inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
-	vertexInputBinding.stride = sizeof(float) * 5;
-	pipeline = createPipeline(context, "../shaders/color_vert.spv", "../shaders/color_frag.spv", renderPass, swapchain.width, swapchain.height, vertexAttributeDescriptions, ARRAY_COUNT(vertexAttributeDescriptions), &vertexInputBinding);
+	vertexInputBinding.stride = sizeof(float) * 7;
+	pipeline = createPipeline(context, "../shaders/texture_vert.spv", "../shaders/texture_frag.spv", renderPass, swapchain.width, swapchain.height, vertexAttributeDescriptions, ARRAY_COUNT(vertexAttributeDescriptions), &vertexInputBinding, 1, &descriptorLayout);
 
 	for(uint32_t i = 0; i < ARRAY_COUNT(fences); ++i) {
 		VkFenceCreateInfo createInfo = { VK_STRUCTURE_TYPE_FENCE_CREATE_INFO };
@@ -144,17 +220,6 @@ void initApplication(SDL_Window* window) {
 	
 	createBuffer(context, &indexBuffer, sizeof(indexData), VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
 	uploadDataToBuffer(context, &indexBuffer, indexData, sizeof(indexData));
-
-	{
-		int width, height, channels;
-		uint8_t* data = stbi_load("../data/images/logo.png", &width, &height, &channels, 4);
-		if(!data) {
-			LOG_ERROR("Could not load image data");
-		}
-		createImage(context, &image, width, height, VK_FORMAT_R8G8B8A8_UNORM, VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT);
-		uploadDataToImage(context, &image, data, width * height * 4, width, height, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT);
-		stbi_image_free(data);
-	}
 }
 
 void recreateSwapchain() {
@@ -221,6 +286,7 @@ void renderApplication() {
 		VkDeviceSize offset = 0;
 		vkCmdBindVertexBuffers(commandBuffer, 0, 1, &vertexBuffer.buffer, &offset);
 		vkCmdBindIndexBuffer(commandBuffer, indexBuffer.buffer, 0, VK_INDEX_TYPE_UINT32);
+		vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline.pipelineLayout, 0, 1, &descriptorSet, 0, 0);
 
 		vkCmdDrawIndexed(commandBuffer, ARRAY_COUNT(indexData), 1, 0, 0, 0);
 
@@ -260,6 +326,9 @@ void renderApplication() {
 void shutdownApplication() {
 	VKA(vkDeviceWaitIdle(context->device));
 
+	VK(vkDestroyDescriptorPool(context->device, descriptorPool, 0));
+	VK(vkDestroyDescriptorSetLayout(context->device, descriptorLayout, 0));
+
 	destroyBuffer(context, &vertexBuffer);
 	destroyBuffer(context, &indexBuffer);
 
@@ -275,6 +344,8 @@ void shutdownApplication() {
 	}
 
 	destroyPipeline(context, &pipeline);
+
+	vkDestroySampler(context->device, sampler, 0);
 
 	for (uint32_t i = 0; i < framebuffers.size(); ++i) {
 		VK(vkDestroyFramebuffer(context->device, framebuffers[i], 0));
