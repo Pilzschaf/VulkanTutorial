@@ -1,3 +1,5 @@
+#pragma once
+
 #include "../logger.h"
 
 #include <vulkan/vulkan.h>

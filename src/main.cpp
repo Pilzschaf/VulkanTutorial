@@ -7,6 +7,7 @@
 
 #include "logger.h"
 #include "vulkan_base/vulkan_base.h"
+#include "model.h"
 
 #define FRAMES_IN_FLIGHT 2
 
@@ -15,7 +16,8 @@ VkSurfaceKHR surface;
 VulkanSwapchain swapchain;
 VkRenderPass renderPass;
 std::vector<VkFramebuffer> framebuffers;
-VulkanPipeline pipeline;
+VulkanPipeline spritePipeline;
+VulkanPipeline modelPipeline;
 VkCommandPool commandPools[FRAMES_IN_FLIGHT];
 VkCommandBuffer commandBuffers[FRAMES_IN_FLIGHT];
 VkFence fences[FRAMES_IN_FLIGHT];
@@ -29,6 +31,8 @@ VkSampler sampler;
 VkDescriptorPool descriptorPool;
 VkDescriptorSet descriptorSet;
 VkDescriptorSetLayout descriptorLayout;
+
+Model model;
 
 bool handleMessage() {
 	SDL_Event event;
@@ -188,7 +192,21 @@ void initApplication(SDL_Window* window) {
 	vertexInputBinding.binding = 0;
 	vertexInputBinding.inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
 	vertexInputBinding.stride = sizeof(float) * 7;
-	pipeline = createPipeline(context, "../shaders/texture_vert.spv", "../shaders/texture_frag.spv", renderPass, swapchain.width, swapchain.height, vertexAttributeDescriptions, ARRAY_COUNT(vertexAttributeDescriptions), &vertexInputBinding, 1, &descriptorLayout);
+	spritePipeline = createPipeline(context, "../shaders/texture_vert.spv", "../shaders/texture_frag.spv", renderPass, swapchain.width, swapchain.height, 
+									vertexAttributeDescriptions, ARRAY_COUNT(vertexAttributeDescriptions), &vertexInputBinding, 1, &descriptorLayout);
+
+
+	VkVertexInputAttributeDescription modelAttributeDescriptions[1] = {};
+	modelAttributeDescriptions[0].binding = 0;
+	modelAttributeDescriptions[0].location = 0;
+	modelAttributeDescriptions[0].format = VK_FORMAT_R32G32B32_SFLOAT;
+	modelAttributeDescriptions[0].offset = 0;
+	VkVertexInputBindingDescription modelInputBinding = {};
+	modelInputBinding.binding = 0;
+	modelInputBinding.inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
+	modelInputBinding.stride = sizeof(float) * 3;
+	modelPipeline = createPipeline(context, "../shaders/model_vert.spv", "../shaders/model_frag.spv", renderPass, swapchain.width, swapchain.height,
+									modelAttributeDescriptions, ARRAY_COUNT(modelAttributeDescriptions), &modelInputBinding, 0, 0);
 
 	for(uint32_t i = 0; i < ARRAY_COUNT(fences); ++i) {
 		VkFenceCreateInfo createInfo = { VK_STRUCTURE_TYPE_FENCE_CREATE_INFO };
@@ -220,6 +238,8 @@ void initApplication(SDL_Window* window) {
 	
 	createBuffer(context, &indexBuffer, sizeof(indexData), VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
 	uploadDataToBuffer(context, &indexBuffer, indexData, sizeof(indexData));
+
+	model = createModel(context, "../data/models/monkey.glb");
 }
 
 void recreateSwapchain() {
@@ -281,14 +301,20 @@ void renderApplication() {
 		beginInfo.pClearValues = &clearValue;
 		vkCmdBeginRenderPass(commandBuffer, &beginInfo, VK_SUBPASS_CONTENTS_INLINE);
 
-		vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline.pipeline);
-
+#if 0
+		vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, spritePipeline.pipeline);
 		VkDeviceSize offset = 0;
 		vkCmdBindVertexBuffers(commandBuffer, 0, 1, &vertexBuffer.buffer, &offset);
 		vkCmdBindIndexBuffer(commandBuffer, indexBuffer.buffer, 0, VK_INDEX_TYPE_UINT32);
-		vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline.pipelineLayout, 0, 1, &descriptorSet, 0, 0);
-
+		vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, spritePipeline.pipelineLayout, 0, 1, &descriptorSet, 0, 0);
 		vkCmdDrawIndexed(commandBuffer, ARRAY_COUNT(indexData), 1, 0, 0, 0);
+#else
+		vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, modelPipeline.pipeline);
+		VkDeviceSize offset = 0;
+		vkCmdBindVertexBuffers(commandBuffer, 0, 1, &model.vertexBuffer.buffer, &offset);
+		vkCmdBindIndexBuffer(commandBuffer, model.indexBuffer.buffer, 0, VK_INDEX_TYPE_UINT16);
+		vkCmdDrawIndexed(commandBuffer, model.numIndices, 1, 0, 0, 0);
+#endif
 
 		vkCmdEndRenderPass(commandBuffer);
 
@@ -329,6 +355,7 @@ void shutdownApplication() {
 	VK(vkDestroyDescriptorPool(context->device, descriptorPool, 0));
 	VK(vkDestroyDescriptorSetLayout(context->device, descriptorLayout, 0));
 
+	destroyModel(context, &model);
 	destroyBuffer(context, &vertexBuffer);
 	destroyBuffer(context, &indexBuffer);
 
@@ -343,7 +370,8 @@ void shutdownApplication() {
 		VK(vkDestroyCommandPool(context->device, commandPools[i], 0));
 	}
 
-	destroyPipeline(context, &pipeline);
+	destroyPipeline(context, &spritePipeline);
+	destroyPipeline(context, &modelPipeline);
 
 	vkDestroySampler(context->device, sampler, 0);
 

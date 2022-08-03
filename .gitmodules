@@ -4,3 +4,6 @@
 [submodule "libs/stb"]
 	path = libs/stb
 	url = https://github.com/nothings/stb.git
+[submodule "libs/cgltf"]
+	path = libs/cgltf
+	url = https://github.com/jkuhlmann/cgltf.git
