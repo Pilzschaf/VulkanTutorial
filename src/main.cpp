@@ -196,15 +196,19 @@ void initApplication(SDL_Window* window) {
 									vertexAttributeDescriptions, ARRAY_COUNT(vertexAttributeDescriptions), &vertexInputBinding, 1, &descriptorLayout);
 
 
-	VkVertexInputAttributeDescription modelAttributeDescriptions[1] = {};
+	VkVertexInputAttributeDescription modelAttributeDescriptions[2] = {};
 	modelAttributeDescriptions[0].binding = 0;
 	modelAttributeDescriptions[0].location = 0;
 	modelAttributeDescriptions[0].format = VK_FORMAT_R32G32B32_SFLOAT;
 	modelAttributeDescriptions[0].offset = 0;
+	modelAttributeDescriptions[1].binding = 0;
+	modelAttributeDescriptions[1].location = 1;
+	modelAttributeDescriptions[1].format = VK_FORMAT_R32G32B32_SFLOAT;
+	modelAttributeDescriptions[1].offset = 0;
 	VkVertexInputBindingDescription modelInputBinding = {};
 	modelInputBinding.binding = 0;
 	modelInputBinding.inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
-	modelInputBinding.stride = sizeof(float) * 3;
+	modelInputBinding.stride = sizeof(float) * 6;
 	modelPipeline = createPipeline(context, "../shaders/model_vert.spv", "../shaders/model_frag.spv", renderPass, swapchain.width, swapchain.height,
 									modelAttributeDescriptions, ARRAY_COUNT(modelAttributeDescriptions), &modelInputBinding, 0, 0);
 
