@@ -125,12 +125,17 @@ void createImage(VulkanContext* context, VulkanImage* image, uint32_t width, uin
 	VKA(vkAllocateMemory(context->device, &allocateInfo, 0, &image->memory));
 	VKA(vkBindImageMemory(context->device, image->image, image->memory, 0));
 
+	VkImageAspectFlags aspect = VK_IMAGE_ASPECT_COLOR_BIT;
+	if(format == VK_FORMAT_D32_SFLOAT) {
+		aspect = VK_IMAGE_ASPECT_DEPTH_BIT;
+	}
+
 	{
 		VkImageViewCreateInfo createInfo = {VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO};
 		createInfo.image = image->image;
 		createInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
 		createInfo.format = format;
-		createInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+		createInfo.subresourceRange.aspectMask = aspect;
 		createInfo.subresourceRange.levelCount = 1;
 		createInfo.subresourceRange.layerCount = 1;
 		VKA(vkCreateImageView(context->device, &createInfo, 0, &image->view));

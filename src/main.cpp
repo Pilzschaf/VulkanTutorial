@@ -19,6 +19,7 @@ VulkanContext* context;
 VkSurfaceKHR surface;
 VulkanSwapchain swapchain;
 VkRenderPass renderPass;
+std::vector<VulkanImage> depthBuffers;
 std::vector<VkFramebuffer> framebuffers;
 VulkanPipeline spritePipeline;
 VulkanPipeline modelPipeline;
@@ -54,17 +55,27 @@ void recreateRenderPass() {
 		for (uint32_t i = 0; i < framebuffers.size(); ++i) {
 			VK(vkDestroyFramebuffer(context->device, framebuffers[i], 0));
 		}
+		for(uint32_t i = 0; i < depthBuffers.size(); ++i) {
+			destroyImage(context, &depthBuffers[i]);
+		}
 		destroyRenderpass(context, renderPass);
 	}
 	framebuffers.clear();
+	depthBuffers.clear();
 
 	renderPass = createRenderPass(context, swapchain.format);
 	framebuffers.resize(swapchain.images.size());
+	depthBuffers.resize(swapchain.images.size());
 	for (uint32_t i = 0; i < swapchain.images.size(); ++i) {
+		createImage(context, &depthBuffers.data()[i], swapchain.width, swapchain.height, VK_FORMAT_D32_SFLOAT, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT);
+		VkImageView attachments[] = {
+			swapchain.imageViews[i],
+			depthBuffers[i].view,
+		};
 		VkFramebufferCreateInfo createInfo = { VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO };
 		createInfo.renderPass = renderPass;
-		createInfo.attachmentCount = 1;
-		createInfo.pAttachments = &swapchain.imageViews[i];
+		createInfo.attachmentCount = ARRAY_COUNT(attachments);
+		createInfo.pAttachments = attachments;
 		createInfo.width = swapchain.width;
 		createInfo.height = swapchain.height;
 		createInfo.layers = 1;
@@ -313,18 +324,21 @@ void renderApplication() {
 		VkCommandBuffer commandBuffer = commandBuffers[frameIndex];
 		VKA(vkBeginCommandBuffer(commandBuffer, &beginInfo));
 
-		VkViewport viewport = { 0.0f, 0.0f, (float)swapchain.width, (float)swapchain.height };
+		VkViewport viewport = { 0.0f, 0.0f, (float)swapchain.width, (float)swapchain.height, 0.0f, 1.0f};
 		VkRect2D scissor = { {0, 0}, {swapchain.width, swapchain.height} };
 		vkCmdSetViewport(commandBuffer, 0, 1, &viewport);
 		vkCmdSetScissor(commandBuffer, 0, 1, &scissor);
 
-		VkClearValue clearValue = {0.0f, greenChannel, 1.0f, 1.0f};
+		VkClearValue clearValues[2] = {
+			{0.0f, greenChannel, 1.0f, 1.0f},
+			{0.0f, 0.0f},
+		};
 		VkRenderPassBeginInfo beginInfo = { VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO };
 		beginInfo.renderPass = renderPass;
 		beginInfo.framebuffer = framebuffers[imageIndex];
 		beginInfo.renderArea = { {0, 0}, {swapchain.width, swapchain.height} };
-		beginInfo.clearValueCount = 1;
-		beginInfo.pClearValues = &clearValue;
+		beginInfo.clearValueCount = ARRAY_COUNT(clearValues);
+		beginInfo.pClearValues = clearValues;
 		vkCmdBeginRenderPass(commandBuffer, &beginInfo, VK_SUBPASS_CONTENTS_INLINE);
 
 #if 0
@@ -415,6 +429,10 @@ void shutdownApplication() {
 		VK(vkDestroyFramebuffer(context->device, framebuffers[i], 0));
 	}
 	framebuffers.clear();
+	for(uint32_t i = 0; i < depthBuffers.size(); ++i) {
+		destroyImage(context, &depthBuffers[i]);
+	}
+	depthBuffers.clear();
 	destroyRenderpass(context, renderPass);
 	destroySwapchain(context, &swapchain);
 	VK(vkDestroySurfaceKHR(context->instance, surface, 0));

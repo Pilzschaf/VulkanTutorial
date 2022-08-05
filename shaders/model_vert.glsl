@@ -11,6 +11,6 @@ layout(location = 0) out vec3 out_normal;
 
 void main() {
 	mat4 modelViewProj = u_pushConstants.modelViewProj;
-	gl_Position = modelViewProj * vec4(in_position.x, in_position.y, in_position.z, 1.0);
+	gl_Position = modelViewProj * vec4(in_position, 1.0);
 	out_normal = in_normal;
 }
