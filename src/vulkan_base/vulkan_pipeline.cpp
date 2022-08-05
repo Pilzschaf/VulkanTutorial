@@ -68,7 +68,7 @@ VulkanPipeline createPipeline(VulkanContext* context, const char* vertexShaderFi
 	VkPipelineDepthStencilStateCreateInfo depthStencilState = {VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO};
 	depthStencilState.depthTestEnable = VK_TRUE;
 	depthStencilState.depthWriteEnable = VK_TRUE;
-	depthStencilState.depthCompareOp = VK_COMPARE_OP_GREATER;
+	depthStencilState.depthCompareOp = VK_COMPARE_OP_GREATER_OR_EQUAL;
 	depthStencilState.minDepthBounds = 0.0f;
 	depthStencilState.maxDepthBounds = 1.0f;
 
