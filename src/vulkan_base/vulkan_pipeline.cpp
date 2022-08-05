@@ -28,7 +28,7 @@ VkShaderModule createShaderModule(VulkanContext* context, const char* shaderFile
 }
 
 VulkanPipeline createPipeline(VulkanContext* context, const char* vertexShaderFilename, const char* fragmentShaderFilename, VkRenderPass renderPass, uint32_t width, uint32_t height,
-							  VkVertexInputAttributeDescription* attributes, uint32_t numAttributes, VkVertexInputBindingDescription* binding, uint32_t numSetLayouts, VkDescriptorSetLayout* setLayouts) {
+							  VkVertexInputAttributeDescription* attributes, uint32_t numAttributes, VkVertexInputBindingDescription* binding, uint32_t numSetLayouts, VkDescriptorSetLayout* setLayouts, VkPushConstantRange* pushConstant) {
 	VkShaderModule vertexShaderModule = createShaderModule(context, vertexShaderFilename);
 	VkShaderModule fragmentShaderModule = createShaderModule(context, fragmentShaderFilename);
 
@@ -88,6 +88,8 @@ VulkanPipeline createPipeline(VulkanContext* context, const char* vertexShaderFi
 		VkPipelineLayoutCreateInfo createInfo = { VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO };
 		createInfo.setLayoutCount = numSetLayouts;
 		createInfo.pSetLayouts = setLayouts;
+		createInfo.pushConstantRangeCount = pushConstant ? 1 : 0;
+		createInfo.pPushConstantRanges = pushConstant;
 		VKA(vkCreatePipelineLayout(context->device, &createInfo, 0, &pipelineLayout));
 	}
 

@@ -5,6 +5,10 @@
 #define STB_IMAGE_IMPLEMENTATION
 #include <stb/stb_image.h>
 
+#define GLM_FORCE_DEPTH_ZERO_TO_ONE
+#include <glm/glm/ext/matrix_transform.hpp>
+#include <glm/glm/gtc/matrix_transform.hpp>
+
 #include "logger.h"
 #include "vulkan_base/vulkan_base.h"
 #include "model.h"
@@ -193,7 +197,7 @@ void initApplication(SDL_Window* window) {
 	vertexInputBinding.inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
 	vertexInputBinding.stride = sizeof(float) * 7;
 	spritePipeline = createPipeline(context, "../shaders/texture_vert.spv", "../shaders/texture_frag.spv", renderPass, swapchain.width, swapchain.height, 
-									vertexAttributeDescriptions, ARRAY_COUNT(vertexAttributeDescriptions), &vertexInputBinding, 1, &descriptorLayout);
+									vertexAttributeDescriptions, ARRAY_COUNT(vertexAttributeDescriptions), &vertexInputBinding, 1, &descriptorLayout, 0);
 
 
 	VkVertexInputAttributeDescription modelAttributeDescriptions[2] = {};
@@ -209,8 +213,12 @@ void initApplication(SDL_Window* window) {
 	modelInputBinding.binding = 0;
 	modelInputBinding.inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
 	modelInputBinding.stride = sizeof(float) * 6;
+	VkPushConstantRange pushConstant = {};
+	pushConstant.offset = 0;
+	pushConstant.size = sizeof(glm::mat4);
+	pushConstant.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
 	modelPipeline = createPipeline(context, "../shaders/model_vert.spv", "../shaders/model_frag.spv", renderPass, swapchain.width, swapchain.height,
-									modelAttributeDescriptions, ARRAY_COUNT(modelAttributeDescriptions), &modelInputBinding, 0, 0);
+									modelAttributeDescriptions, ARRAY_COUNT(modelAttributeDescriptions), &modelInputBinding, 0, 0, &pushConstant);
 
 	for(uint32_t i = 0; i < ARRAY_COUNT(fences); ++i) {
 		VkFenceCreateInfo createInfo = { VK_STRUCTURE_TYPE_FENCE_CREATE_INFO };
@@ -263,8 +271,22 @@ void recreateSwapchain() {
 	recreateRenderPass();
 }
 
+// https://nlguillemot.wordpress.com/2016/12/07/reversed-z-in-opengl/
+glm::mat4 getProjectionInverseZ(float fovy, float width, float height, float zNear) {
+	float f = 1.0f / tanf(fovy / 2.0f);
+	float aspect = width / height;
+	return glm::mat4(
+		f / aspect, 0.0f,  0.0f,  0.0f,
+		0.0f,   -f,  0.0f,  0.0f,	// -f to flip y axis
+		0.0f, 0.0f,  0.0f, 1.0f,
+		0.0f, 0.0f, zNear,  0.0f
+	);
+}
+
 void renderApplication() {
 	static float greenChannel = 0.0f;
+	static float time = 0.0f;
+	time += 0.01f;
 	greenChannel += 0.01f;
 	if (greenChannel > 1.0f) greenChannel = 0.0f;
 	uint32_t imageIndex = 0;
@@ -313,10 +335,20 @@ void renderApplication() {
 		vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, spritePipeline.pipelineLayout, 0, 1, &descriptorSet, 0, 0);
 		vkCmdDrawIndexed(commandBuffer, ARRAY_COUNT(indexData), 1, 0, 0, 0);
 #else
+		glm::mat4 translationMatrix = glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, 0.0f, 2.0f));
+		glm::mat4 scaleMatrix = glm::scale(glm::mat4(1.0f), glm::vec3(1.0f));
+		glm::mat4 rotationMatrix = glm::rotate(glm::mat4(1.0f), -time, glm::vec3(0.0f, 1.0f, 0.0f));
+		glm::mat4 modelMatrix = translationMatrix * scaleMatrix * rotationMatrix;
+
+		//glm::mat4 projection = glm::ortho(0.0f, (float)swapchain.width, 0.0f, (float)swapchain.height, 0.0f, 1000.0f);
+		glm::mat4 projection = getProjectionInverseZ(glm::radians(80.0f), swapchain.width, swapchain.height, 0.01f);
+		glm::mat4 modelViewProj = projection * modelMatrix;
+
 		vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, modelPipeline.pipeline);
 		VkDeviceSize offset = 0;
 		vkCmdBindVertexBuffers(commandBuffer, 0, 1, &model.vertexBuffer.buffer, &offset);
 		vkCmdBindIndexBuffer(commandBuffer, model.indexBuffer.buffer, 0, VK_INDEX_TYPE_UINT16);
+		vkCmdPushConstants(commandBuffer, modelPipeline.pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(modelViewProj), &modelViewProj);
 		vkCmdDrawIndexed(commandBuffer, model.numIndices, 1, 0, 0, 0);
 #endif
 

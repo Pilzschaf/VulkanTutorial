@@ -73,5 +73,5 @@ void uploadDataToImage(VulkanContext* context, VulkanImage* image, void* data, s
 void destroyImage(VulkanContext* context, VulkanImage* image);
 
 VulkanPipeline createPipeline(VulkanContext* context, const char* vertexShaderFilename, const char* fragmentShaderFilename, VkRenderPass renderPass, uint32_t width, uint32_t height,
-							  VkVertexInputAttributeDescription* attributes, uint32_t numAttributes, VkVertexInputBindingDescription* binding, uint32_t numSetLayouts, VkDescriptorSetLayout* setLayouts);
+							  VkVertexInputAttributeDescription* attributes, uint32_t numAttributes, VkVertexInputBindingDescription* binding, uint32_t numSetLayouts, VkDescriptorSetLayout* setLayouts, VkPushConstantRange* pushConstant);
 void destroyPipeline(VulkanContext* context, VulkanPipeline* pipeline);
