@@ -21,23 +21,27 @@ VulkanSwapchain swapchain;
 VkRenderPass renderPass;
 std::vector<VulkanImage> depthBuffers;
 std::vector<VkFramebuffer> framebuffers;
-VulkanPipeline spritePipeline;
-VulkanPipeline modelPipeline;
 VkCommandPool commandPools[FRAMES_IN_FLIGHT];
 VkCommandBuffer commandBuffers[FRAMES_IN_FLIGHT];
 VkFence fences[FRAMES_IN_FLIGHT];
 VkSemaphore acquireSemaphores[FRAMES_IN_FLIGHT];
 VkSemaphore releaseSemaphores[FRAMES_IN_FLIGHT];
-VulkanBuffer vertexBuffer;
-VulkanBuffer indexBuffer;
-VulkanImage image;
 
+VulkanBuffer spriteVertexBuffer;
+VulkanBuffer spriteIndexBuffer;
+VulkanImage image;
 VkSampler sampler;
-VkDescriptorPool descriptorPool;
-VkDescriptorSet descriptorSet;
-VkDescriptorSetLayout descriptorLayout;
+VkDescriptorPool spriteDescriptorPool;
+VkDescriptorSet spriteDescriptorSet;
+VkDescriptorSetLayout spriteDescriptorLayout;
+VulkanPipeline spritePipeline;
 
 Model model;
+VulkanPipeline modelPipeline;
+VkDescriptorSetLayout modelDescriptorSetLayout;
+VkDescriptorPool modelDescriptorPool;
+VkDescriptorSet modelDescriptorSets[FRAMES_IN_FLIGHT];
+VulkanBuffer modelUniformBuffers[FRAMES_IN_FLIGHT];
 
 bool handleMessage() {
 	SDL_Event event;
@@ -161,7 +165,7 @@ void initApplication(SDL_Window* window) {
 		createInfo.maxSets = 1;
 		createInfo.poolSizeCount = ARRAY_COUNT(poolSizes);
 		createInfo.pPoolSizes = poolSizes;
-		VKA(vkCreateDescriptorPool(context->device, &createInfo, 0, &descriptorPool));
+		VKA(vkCreateDescriptorPool(context->device, &createInfo, 0, &spriteDescriptorPool));
 	}
 
 	{
@@ -171,23 +175,64 @@ void initApplication(SDL_Window* window) {
 		VkDescriptorSetLayoutCreateInfo createInfo = {VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO};
 		createInfo.bindingCount = ARRAY_COUNT(bindings);
 		createInfo.pBindings = bindings;
-		VKA(vkCreateDescriptorSetLayout(context->device, &createInfo, 0, &descriptorLayout));
+		VKA(vkCreateDescriptorSetLayout(context->device, &createInfo, 0, &spriteDescriptorLayout));
 
 		VkDescriptorSetAllocateInfo allocateInfo = {VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO};
-		allocateInfo.descriptorPool = descriptorPool;
+		allocateInfo.descriptorPool = spriteDescriptorPool;
 		allocateInfo.descriptorSetCount = 1;
-		allocateInfo.pSetLayouts = &descriptorLayout;
-		VKA(vkAllocateDescriptorSets(context->device, &allocateInfo, &descriptorSet));
+		allocateInfo.pSetLayouts = &spriteDescriptorLayout;
+		VKA(vkAllocateDescriptorSets(context->device, &allocateInfo, &spriteDescriptorSet));
 
 		VkDescriptorImageInfo imageInfo = { sampler, image.view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
 		VkWriteDescriptorSet descriptorWrites[1];
 		descriptorWrites[0] = {VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET};
-		descriptorWrites[0].dstSet = descriptorSet;
+		descriptorWrites[0].dstSet = spriteDescriptorSet;
 		descriptorWrites[0].dstBinding = 0;
 		descriptorWrites[0].descriptorCount = 1;
 		descriptorWrites[0].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
 		descriptorWrites[0].pImageInfo = &imageInfo;
 		VK(vkUpdateDescriptorSets(context->device, ARRAY_COUNT(descriptorWrites), descriptorWrites, 0, 0));
+	}
+
+	{
+		VkDescriptorPoolSize poolSizes[] = {
+			{VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, FRAMES_IN_FLIGHT},
+		};
+		VkDescriptorPoolCreateInfo createInfo = {VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO};
+		createInfo.maxSets = FRAMES_IN_FLIGHT;
+		createInfo.poolSizeCount = ARRAY_COUNT(poolSizes);
+		createInfo.pPoolSizes = poolSizes;
+		VKA(vkCreateDescriptorPool(context->device, &createInfo, 0, &modelDescriptorPool));
+	}
+	for(uint32_t i = 0; i < FRAMES_IN_FLIGHT; ++i) {
+		createBuffer(context, &modelUniformBuffers[i], sizeof(glm::mat4), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+	}
+	{
+		VkDescriptorSetLayoutBinding bindings[] = {
+			{0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1, VK_SHADER_STAGE_VERTEX_BIT, 0},
+		};
+		VkDescriptorSetLayoutCreateInfo createInfo = {VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO};
+		createInfo.bindingCount = ARRAY_COUNT(bindings);
+		createInfo.pBindings = bindings;
+		VKA(vkCreateDescriptorSetLayout(context->device, &createInfo, 0, &modelDescriptorSetLayout));
+
+		for(uint32_t i = 0; i < FRAMES_IN_FLIGHT; ++i) {
+			VkDescriptorSetAllocateInfo allocateInfo = {VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO};
+			allocateInfo.descriptorPool = modelDescriptorPool;
+			allocateInfo.descriptorSetCount = 1;
+			allocateInfo.pSetLayouts = &modelDescriptorSetLayout;
+			VKA(vkAllocateDescriptorSets(context->device, &allocateInfo, &modelDescriptorSets[i]));
+
+			VkDescriptorBufferInfo bufferInfo = {modelUniformBuffers[i].buffer, 0, sizeof(glm::mat4)};
+			VkWriteDescriptorSet descriptorWrites[1];
+			descriptorWrites[0] = {VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET};
+			descriptorWrites[0].dstSet = modelDescriptorSets[i];
+			descriptorWrites[0].dstBinding = 0;
+			descriptorWrites[0].descriptorCount = 1;
+			descriptorWrites[0].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+			descriptorWrites[0].pBufferInfo = &bufferInfo;
+			VK(vkUpdateDescriptorSets(context->device, ARRAY_COUNT(descriptorWrites), descriptorWrites, 0, 0));
+		}
 	}
 
 	VkVertexInputAttributeDescription vertexAttributeDescriptions[3] = {};
@@ -208,7 +253,7 @@ void initApplication(SDL_Window* window) {
 	vertexInputBinding.inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
 	vertexInputBinding.stride = sizeof(float) * 7;
 	spritePipeline = createPipeline(context, "../shaders/texture_vert.spv", "../shaders/texture_frag.spv", renderPass, swapchain.width, swapchain.height, 
-									vertexAttributeDescriptions, ARRAY_COUNT(vertexAttributeDescriptions), &vertexInputBinding, 1, &descriptorLayout, 0);
+									vertexAttributeDescriptions, ARRAY_COUNT(vertexAttributeDescriptions), &vertexInputBinding, 1, &spriteDescriptorLayout, 0);
 
 
 	VkVertexInputAttributeDescription modelAttributeDescriptions[2] = {};
@@ -224,12 +269,8 @@ void initApplication(SDL_Window* window) {
 	modelInputBinding.binding = 0;
 	modelInputBinding.inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
 	modelInputBinding.stride = sizeof(float) * 6;
-	VkPushConstantRange pushConstant = {};
-	pushConstant.offset = 0;
-	pushConstant.size = sizeof(glm::mat4);
-	pushConstant.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
 	modelPipeline = createPipeline(context, "../shaders/model_vert.spv", "../shaders/model_frag.spv", renderPass, swapchain.width, swapchain.height,
-									modelAttributeDescriptions, ARRAY_COUNT(modelAttributeDescriptions), &modelInputBinding, 0, 0, &pushConstant);
+									modelAttributeDescriptions, ARRAY_COUNT(modelAttributeDescriptions), &modelInputBinding, 1, &modelDescriptorSetLayout, 0);
 
 	for(uint32_t i = 0; i < ARRAY_COUNT(fences); ++i) {
 		VkFenceCreateInfo createInfo = { VK_STRUCTURE_TYPE_FENCE_CREATE_INFO };
@@ -256,11 +297,11 @@ void initApplication(SDL_Window* window) {
 		VKA(vkAllocateCommandBuffers(context->device, &allocateInfo, &commandBuffers[i]));
 	}
 
-	createBuffer(context, &vertexBuffer, sizeof(vertexData), VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
-	uploadDataToBuffer(context, &vertexBuffer, vertexData, sizeof(vertexData));
+	createBuffer(context, &spriteVertexBuffer, sizeof(vertexData), VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+	uploadDataToBuffer(context, &spriteVertexBuffer, vertexData, sizeof(vertexData));
 	
-	createBuffer(context, &indexBuffer, sizeof(indexData), VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
-	uploadDataToBuffer(context, &indexBuffer, indexData, sizeof(indexData));
+	createBuffer(context, &spriteIndexBuffer, sizeof(indexData), VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+	uploadDataToBuffer(context, &spriteIndexBuffer, indexData, sizeof(indexData));
 
 	model = createModel(context, "../data/models/monkey.glb");
 }
@@ -344,9 +385,9 @@ void renderApplication() {
 #if 0
 		vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, spritePipeline.pipeline);
 		VkDeviceSize offset = 0;
-		vkCmdBindVertexBuffers(commandBuffer, 0, 1, &vertexBuffer.buffer, &offset);
-		vkCmdBindIndexBuffer(commandBuffer, indexBuffer.buffer, 0, VK_INDEX_TYPE_UINT32);
-		vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, spritePipeline.pipelineLayout, 0, 1, &descriptorSet, 0, 0);
+		vkCmdBindVertexBuffers(commandBuffer, 0, 1, &spriteVertexBuffer.buffer, &offset);
+		vkCmdBindIndexBuffer(commandBuffer, spriteIndexBuffer.buffer, 0, VK_INDEX_TYPE_UINT32);
+		vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, spritePipeline.pipelineLayout, 0, 1, &spriteDescriptorSet, 0, 0);
 		vkCmdDrawIndexed(commandBuffer, ARRAY_COUNT(indexData), 1, 0, 0, 0);
 #else
 		glm::mat4 translationMatrix = glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, 0.0f, 2.0f));
@@ -358,11 +399,16 @@ void renderApplication() {
 		glm::mat4 projection = getProjectionInverseZ(glm::radians(80.0f), swapchain.width, swapchain.height, 0.01f);
 		glm::mat4 modelViewProj = projection * modelMatrix;
 
+		void* mapped;
+		VK(vkMapMemory(context->device, modelUniformBuffers[frameIndex].memory, 0, sizeof(glm::mat4), 0, &mapped));
+		memcpy(mapped, &modelViewProj, sizeof(modelViewProj));
+		VK(vkUnmapMemory(context->device, modelUniformBuffers[frameIndex].memory));
+
 		vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, modelPipeline.pipeline);
 		VkDeviceSize offset = 0;
 		vkCmdBindVertexBuffers(commandBuffer, 0, 1, &model.vertexBuffer.buffer, &offset);
 		vkCmdBindIndexBuffer(commandBuffer, model.indexBuffer.buffer, 0, VK_INDEX_TYPE_UINT16);
-		vkCmdPushConstants(commandBuffer, modelPipeline.pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(modelViewProj), &modelViewProj);
+		vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, modelPipeline.pipelineLayout, 0, 1, &modelDescriptorSets[frameIndex], 0, 0);
 		vkCmdDrawIndexed(commandBuffer, model.numIndices, 1, 0, 0, 0);
 #endif
 
@@ -402,13 +448,17 @@ void renderApplication() {
 void shutdownApplication() {
 	VKA(vkDeviceWaitIdle(context->device));
 
-	VK(vkDestroyDescriptorPool(context->device, descriptorPool, 0));
-	VK(vkDestroyDescriptorSetLayout(context->device, descriptorLayout, 0));
-
+	VK(vkDestroyDescriptorPool(context->device, modelDescriptorPool, 0));
+	VK(vkDestroyDescriptorSetLayout(context->device, modelDescriptorSetLayout, 0));
 	destroyModel(context, &model);
-	destroyBuffer(context, &vertexBuffer);
-	destroyBuffer(context, &indexBuffer);
+	for(uint32_t i = 0; i < FRAMES_IN_FLIGHT; ++i) {
+		destroyBuffer(context, &modelUniformBuffers[i]);
+	}
 
+	VK(vkDestroyDescriptorPool(context->device, spriteDescriptorPool, 0));
+	VK(vkDestroyDescriptorSetLayout(context->device, spriteDescriptorLayout, 0));
+	destroyBuffer(context, &spriteVertexBuffer);
+	destroyBuffer(context, &spriteIndexBuffer);
 	destroyImage(context, &image);
 
 	for(uint32_t i = 0; i < FRAMES_IN_FLIGHT; ++i) {
