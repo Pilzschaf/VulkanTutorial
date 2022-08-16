@@ -43,12 +43,32 @@ VkDescriptorPool modelDescriptorPool;
 VkDescriptorSet modelDescriptorSets[FRAMES_IN_FLIGHT];
 VulkanBuffer modelUniformBuffers[FRAMES_IN_FLIGHT];
 
+struct Camera {
+	glm::vec3 cameraPosition;
+	glm::vec3 cameraDirection;
+	glm::vec3 up;
+	float yaw;
+	float pitch;
+	glm::mat4 viewProj;
+	glm::mat4 view;
+	glm::mat4 proj;
+} camera;
+
 bool handleMessage() {
 	SDL_Event event;
 	while (SDL_PollEvent(&event)) {
 		switch (event.type) {
 		case SDL_QUIT:
 			return false;
+		case SDL_KEYDOWN:
+			if(event.key.keysym.scancode == SDL_SCANCODE_ESCAPE) {
+				SDL_SetRelativeMouseMode(SDL_FALSE);
+			}
+		case SDL_MOUSEBUTTONDOWN:
+			if(event.button.button == SDL_BUTTON_LEFT) {
+				SDL_SetRelativeMouseMode(SDL_TRUE);
+			}
+			break;
 		}
 	}
 	return true;
@@ -304,6 +324,14 @@ void initApplication(SDL_Window* window) {
 	uploadDataToBuffer(context, &spriteIndexBuffer, indexData, sizeof(indexData));
 
 	model = createModel(context, "../data/models/monkey.glb");
+
+	{ // Init camera
+		camera.cameraPosition = glm::vec3(0.0f);
+		camera.cameraDirection = glm::vec3(0.0f, 0.0f, 1.0f);
+		camera.up = glm::vec3(0.0f, 1.0f, 0.0f);
+		camera.yaw = 0.0f;
+		camera.pitch = 0.0f;
+	}
 }
 
 void recreateSwapchain() {
@@ -390,14 +418,12 @@ void renderApplication() {
 		vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, spritePipeline.pipelineLayout, 0, 1, &spriteDescriptorSet, 0, 0);
 		vkCmdDrawIndexed(commandBuffer, ARRAY_COUNT(indexData), 1, 0, 0, 0);
 #else
-		glm::mat4 translationMatrix = glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, 0.0f, 2.0f));
+		glm::mat4 translationMatrix = glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, 0.0f, 3.0f));
 		glm::mat4 scaleMatrix = glm::scale(glm::mat4(1.0f), glm::vec3(1.0f));
 		glm::mat4 rotationMatrix = glm::rotate(glm::mat4(1.0f), -time, glm::vec3(0.0f, 1.0f, 0.0f));
 		glm::mat4 modelMatrix = translationMatrix * scaleMatrix * rotationMatrix;
 
-		//glm::mat4 projection = glm::ortho(0.0f, (float)swapchain.width, 0.0f, (float)swapchain.height, 0.0f, 1000.0f);
-		glm::mat4 projection = getProjectionInverseZ(glm::radians(80.0f), swapchain.width, swapchain.height, 0.01f);
-		glm::mat4 modelViewProj = projection * modelMatrix;
+		glm::mat4 modelViewProj = camera.viewProj * modelMatrix;
 
 		void* mapped;
 		VK(vkMapMemory(context->device, modelUniformBuffers[frameIndex].memory, 0, sizeof(glm::mat4), 0, &mapped));
@@ -489,6 +515,50 @@ void shutdownApplication() {
 	exitVulkan(context);
 }
 
+void updateApplication(float delta) {
+	const uint8_t* keys = SDL_GetKeyboardState(0);
+	int mouseX, mouseY;
+	uint32_t mouseButtons = SDL_GetRelativeMouseState(&mouseX, &mouseY);
+
+	if(SDL_GetRelativeMouseMode()) {
+		float cameraSpeed = 5.0f;
+		float mouseSensitivity = 0.27f;
+
+		if(keys[SDL_SCANCODE_W]) {
+			camera.cameraPosition += glm::normalize(glm::vec3(1.0f, 0.0f, 1.0f)*camera.cameraDirection) * delta * cameraSpeed;
+		}
+		if(keys[SDL_SCANCODE_S]) {
+			camera.cameraPosition -= glm::normalize(glm::vec3(1.0f, 0.0f, 1.0f)*camera.cameraDirection) * delta * cameraSpeed;
+		}
+		if(keys[SDL_SCANCODE_A]) {
+			camera.cameraPosition += glm::normalize(glm::cross(camera.cameraDirection, camera.up)) * delta * cameraSpeed;
+		}
+		if(keys[SDL_SCANCODE_D]) {
+			camera.cameraPosition -= glm::normalize(glm::cross(camera.cameraDirection, camera.up)) * delta * cameraSpeed;
+		}
+		if(keys[SDL_SCANCODE_SPACE]) {
+			camera.cameraPosition += glm::normalize(camera.up) * delta * cameraSpeed;
+		}
+		if(keys[SDL_SCANCODE_LSHIFT]) {
+			camera.cameraPosition -= glm::normalize(camera.up) * delta * cameraSpeed;
+		}
+
+		camera.yaw += mouseX * mouseSensitivity;
+		camera.pitch -= mouseY * mouseSensitivity;
+	}
+
+	if(camera.pitch > 89.0f) camera.pitch = 89.0f;
+	if(camera.pitch < -89.0f) camera.pitch = -89.0f;
+	glm::vec3 front;
+	front.x = cos(glm::radians(camera.pitch)) * sin(glm::radians(camera.yaw));
+	front.y = sin(glm::radians(camera.pitch));
+	front.z = cos(glm::radians(camera.pitch)) * cos(glm::radians(camera.yaw));
+	camera.cameraDirection = glm::normalize(front);
+	camera.proj = getProjectionInverseZ(glm::radians(45.0f), swapchain.width, swapchain.height, 0.01f);
+	camera.view = glm::lookAtLH(camera.cameraPosition, camera.cameraPosition + camera.cameraDirection, camera.up);
+	camera.viewProj = camera.proj * camera.view;
+}
+
 int main() {
 	if (SDL_Init(SDL_INIT_VIDEO) != 0) {
 		LOG_ERROR("Error initializing SDL: ", SDL_GetError());
@@ -503,8 +573,17 @@ int main() {
 
 	initApplication(window);
 
+	float delta = 0.0f;
+	uint64_t perfCounterFrequency = SDL_GetPerformanceFrequency();
+	uint64_t lastCounter = SDL_GetPerformanceCounter();
 	while (handleMessage()) {
+		updateApplication(delta);
 		renderApplication();
+
+		uint64_t endCounter = SDL_GetPerformanceCounter();
+		uint64_t counterElapsed = endCounter - lastCounter;
+		delta = ((float)counterElapsed) / (float) perfCounterFrequency;
+		lastCounter = endCounter;
 	}
 
 	shutdownApplication();
