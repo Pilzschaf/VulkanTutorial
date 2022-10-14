@@ -43,6 +43,8 @@ VkDescriptorPool modelDescriptorPool;
 VkDescriptorSet modelDescriptorSets[FRAMES_IN_FLIGHT];
 VulkanBuffer modelUniformBuffers[FRAMES_IN_FLIGHT];
 
+VkQueryPool timestampQueryPools[FRAMES_IN_FLIGHT];
+
 struct Camera {
 	glm::vec3 cameraPosition;
 	glm::vec3 cameraDirection;
@@ -254,6 +256,12 @@ void initApplication(SDL_Window* window) {
 			VK(vkUpdateDescriptorSets(context->device, ARRAY_COUNT(descriptorWrites), descriptorWrites, 0, 0));
 		}
 	}
+	for(uint32_t i = 0; i < FRAMES_IN_FLIGHT; ++i) {
+		VkQueryPoolCreateInfo createInfo = {VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO};
+		createInfo.queryType = VK_QUERY_TYPE_TIMESTAMP;
+		createInfo.queryCount = 64;
+		VKA(vkCreateQueryPool(context->device, &createInfo, 0, &timestampQueryPools[i]));
+	}
 
 	VkVertexInputAttributeDescription vertexAttributeDescriptions[3] = {};
 	vertexAttributeDescriptions[0].binding = 0;
@@ -366,6 +374,7 @@ glm::mat4 getProjectionInverseZ(float fovy, float width, float height, float zNe
 void renderApplication() {
 	static float greenChannel = 0.0f;
 	static float time = 0.0f;
+	static double frameGpuAvg = 0.0;
 	time += 0.01f;
 	greenChannel += 0.01f;
 	if (greenChannel > 1.0f) greenChannel = 0.0f;
@@ -385,6 +394,16 @@ void renderApplication() {
 		ASSERT_VULKAN(result);
 	}
 
+	// Query timestamps
+	uint64_t timestamps[2] = {};
+	VkResult timestampsValid = VK(vkGetQueryPoolResults(context->device, timestampQueryPools[frameIndex], 0, ARRAY_COUNT(timestamps), sizeof(timestamps), timestamps, sizeof(timestamps[0]), VK_QUERY_RESULT_64_BIT));
+	if(timestampsValid == VK_SUCCESS) {
+		double frameGpuBegin = double(timestamps[0]) * context->physicalDeviceProperties.limits.timestampPeriod * 1e-6;
+		double frameGpuEnd = double(timestamps[1]) * context->physicalDeviceProperties.limits.timestampPeriod * 1e-6;
+		frameGpuAvg = frameGpuAvg * 0.95 + (frameGpuEnd - frameGpuBegin) * 0.05;
+		LOG_INFO("GPU frametime: ", frameGpuAvg, "ms");
+	}
+
 	VKA(vkResetCommandPool(context->device, commandPools[frameIndex], 0));
 
 	VkCommandBufferBeginInfo beginInfo = { VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO };
@@ -392,6 +411,9 @@ void renderApplication() {
 	{
 		VkCommandBuffer commandBuffer = commandBuffers[frameIndex];
 		VKA(vkBeginCommandBuffer(commandBuffer, &beginInfo));
+
+		VK(vkCmdResetQueryPool(commandBuffer, timestampQueryPools[frameIndex], 0, 64));
+		VK(vkCmdWriteTimestamp(commandBuffer, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, timestampQueryPools[frameIndex], 0));
 
 		VkViewport viewport = { 0.0f, 0.0f, (float)swapchain.width, (float)swapchain.height, 0.0f, 1.0f};
 		VkRect2D scissor = { {0, 0}, {swapchain.width, swapchain.height} };
@@ -440,6 +462,8 @@ void renderApplication() {
 
 		vkCmdEndRenderPass(commandBuffer);
 
+		VK(vkCmdWriteTimestamp(commandBuffer, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, timestampQueryPools[frameIndex], 1));
+
 		VKA(vkEndCommandBuffer(commandBuffer));
 	}
 	
@@ -479,6 +503,10 @@ void shutdownApplication() {
 	destroyModel(context, &model);
 	for(uint32_t i = 0; i < FRAMES_IN_FLIGHT; ++i) {
 		destroyBuffer(context, &modelUniformBuffers[i]);
+	}
+
+	for(uint32_t i = 0; i < FRAMES_IN_FLIGHT; ++i) {
+		vkDestroyQueryPool(context->device, timestampQueryPools[i], 0);
 	}
 
 	VK(vkDestroyDescriptorPool(context->device, spriteDescriptorPool, 0));
@@ -574,6 +602,7 @@ int main() {
 	initApplication(window);
 
 	float delta = 0.0f;
+	double frameCpuAvg = 0.0f;
 	uint64_t perfCounterFrequency = SDL_GetPerformanceFrequency();
 	uint64_t lastCounter = SDL_GetPerformanceCounter();
 	while (handleMessage()) {
@@ -582,6 +611,8 @@ int main() {
 
 		uint64_t endCounter = SDL_GetPerformanceCounter();
 		uint64_t counterElapsed = endCounter - lastCounter;
+		frameCpuAvg = frameCpuAvg * 0.95f + delta * 0.05f * 1000.0f;
+		//LOG_INFO("CPU frametime: ", frameCpuAvg, "ms");
 		delta = ((float)counterElapsed) / (float) perfCounterFrequency;
 		lastCounter = endCounter;
 	}
