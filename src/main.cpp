@@ -20,6 +20,7 @@ VkSurfaceKHR surface;
 VulkanSwapchain swapchain;
 VkRenderPass renderPass;
 std::vector<VulkanImage> depthBuffers;
+std::vector<VulkanImage> colorBuffers;
 std::vector<VkFramebuffer> framebuffers;
 VkCommandPool commandPools[FRAMES_IN_FLIGHT];
 VkCommandBuffer commandBuffers[FRAMES_IN_FLIGHT];
@@ -84,19 +85,26 @@ void recreateRenderPass() {
 		for(uint32_t i = 0; i < depthBuffers.size(); ++i) {
 			destroyImage(context, &depthBuffers[i]);
 		}
+		for(uint32_t i = 0; i < colorBuffers.size(); ++i) {
+			destroyImage(context, &colorBuffers[i]);
+		}
 		destroyRenderpass(context, renderPass);
 	}
 	framebuffers.clear();
 	depthBuffers.clear();
+	colorBuffers.clear();
 
-	renderPass = createRenderPass(context, swapchain.format);
+	renderPass = createRenderPass(context, swapchain.format, VK_SAMPLE_COUNT_4_BIT);
 	framebuffers.resize(swapchain.images.size());
 	depthBuffers.resize(swapchain.images.size());
+	colorBuffers.resize(swapchain.images.size());
 	for (uint32_t i = 0; i < swapchain.images.size(); ++i) {
-		createImage(context, &depthBuffers.data()[i], swapchain.width, swapchain.height, VK_FORMAT_D32_SFLOAT, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT);
+		createImage(context, &depthBuffers.data()[i], swapchain.width, swapchain.height, VK_FORMAT_D32_SFLOAT, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT, VK_SAMPLE_COUNT_4_BIT);
+		createImage(context, &colorBuffers.data()[i], swapchain.width, swapchain.height, swapchain.format, VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT, VK_SAMPLE_COUNT_4_BIT);
 		VkImageView attachments[] = {
-			swapchain.imageViews[i],
+			colorBuffers[i].view,
 			depthBuffers[i].view,
+			swapchain.imageViews[i],
 		};
 		VkFramebufferCreateInfo createInfo = { VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO };
 		createInfo.renderPass = renderPass;
@@ -536,6 +544,10 @@ void shutdownApplication() {
 	for(uint32_t i = 0; i < depthBuffers.size(); ++i) {
 		destroyImage(context, &depthBuffers[i]);
 	}
+	for(uint32_t i = 0; i < colorBuffers.size(); ++i) {
+		destroyImage(context, &colorBuffers[i]);
+	}
+	colorBuffers.clear();
 	depthBuffers.clear();
 	destroyRenderpass(context, renderPass);
 	destroySwapchain(context, &swapchain);

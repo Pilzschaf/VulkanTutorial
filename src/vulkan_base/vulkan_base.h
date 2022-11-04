@@ -61,14 +61,14 @@ void exitVulkan(VulkanContext* context);
 VulkanSwapchain createSwapchain(VulkanContext* context, VkSurfaceKHR surface, VkImageUsageFlags usage, VulkanSwapchain* oldSwapchain = 0);
 void destroySwapchain(VulkanContext* context, VulkanSwapchain* swapchain);
 
-VkRenderPass createRenderPass(VulkanContext* context, VkFormat format);
+VkRenderPass createRenderPass(VulkanContext* context, VkFormat format, VkSampleCountFlagBits sampleCount);
 void destroyRenderpass(VulkanContext* context, VkRenderPass renderPass);
 
 void createBuffer(VulkanContext* context, VulkanBuffer* buffer, uint64_t size, VkBufferUsageFlags usage, VkMemoryPropertyFlags memoryProperties);
 void uploadDataToBuffer(VulkanContext* context, VulkanBuffer* buffer, void* data, size_t size);
 void destroyBuffer(VulkanContext* context, VulkanBuffer* buffer);
 
-void createImage(VulkanContext* context, VulkanImage* image, uint32_t width, uint32_t height, VkFormat format, VkImageUsageFlags usage);
+void createImage(VulkanContext* context, VulkanImage* image, uint32_t width, uint32_t height, VkFormat format, VkImageUsageFlags usage, VkSampleCountFlagBits sampleCount = VK_SAMPLE_COUNT_1_BIT);
 void uploadDataToImage(VulkanContext* context, VulkanImage* image, void* data, size_t size, uint32_t width, uint32_t height, VkImageLayout finalLayout, VkAccessFlags dstAccessMask);
 void destroyImage(VulkanContext* context, VulkanImage* image);
 
