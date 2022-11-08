@@ -4,6 +4,7 @@ struct Model {
     VulkanBuffer vertexBuffer;
     VulkanBuffer indexBuffer;
     uint64_t numIndices;
+    VulkanImage albedoTexture;
 };
 
 Model createModel(VulkanContext* context, const char* filename);

@@ -161,6 +161,9 @@ void initApplication(SDL_Window* window) {
 
 	recreateRenderPass();
 
+	//model = createModel(context, "../data/models/monkey.glb");
+	model = createModel(context, "../libs/glTF-Sample-Models/2.0/BoomBox/glTF-Binary/BoomBox.glb");
+
 	{
 		VkSamplerCreateInfo createInfo = {VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO};
 		createInfo.magFilter = VK_FILTER_NEAREST;
@@ -227,6 +230,7 @@ void initApplication(SDL_Window* window) {
 	{
 		VkDescriptorPoolSize poolSizes[] = {
 			{VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, FRAMES_IN_FLIGHT},
+			{VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, FRAMES_IN_FLIGHT},
 		};
 		VkDescriptorPoolCreateInfo createInfo = {VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO};
 		createInfo.maxSets = FRAMES_IN_FLIGHT;
@@ -240,6 +244,7 @@ void initApplication(SDL_Window* window) {
 	{
 		VkDescriptorSetLayoutBinding bindings[] = {
 			{0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1, VK_SHADER_STAGE_VERTEX_BIT, 0},
+			{1, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1, VK_SHADER_STAGE_FRAGMENT_BIT, &sampler},
 		};
 		VkDescriptorSetLayoutCreateInfo createInfo = {VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO};
 		createInfo.bindingCount = ARRAY_COUNT(bindings);
@@ -254,13 +259,20 @@ void initApplication(SDL_Window* window) {
 			VKA(vkAllocateDescriptorSets(context->device, &allocateInfo, &modelDescriptorSets[i]));
 
 			VkDescriptorBufferInfo bufferInfo = {modelUniformBuffers[i].buffer, 0, sizeof(glm::mat4)};
-			VkWriteDescriptorSet descriptorWrites[1];
+			VkDescriptorImageInfo imageInfo = {sampler, model.albedoTexture.view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
+			VkWriteDescriptorSet descriptorWrites[2];
 			descriptorWrites[0] = {VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET};
 			descriptorWrites[0].dstSet = modelDescriptorSets[i];
 			descriptorWrites[0].dstBinding = 0;
 			descriptorWrites[0].descriptorCount = 1;
 			descriptorWrites[0].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
 			descriptorWrites[0].pBufferInfo = &bufferInfo;
+			descriptorWrites[1] = {VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET};
+			descriptorWrites[1].dstSet = modelDescriptorSets[i];
+			descriptorWrites[1].dstBinding = 1;
+			descriptorWrites[1].descriptorCount = 1;
+			descriptorWrites[1].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+			descriptorWrites[1].pImageInfo = &imageInfo;
 			VK(vkUpdateDescriptorSets(context->device, ARRAY_COUNT(descriptorWrites), descriptorWrites, 0, 0));
 		}
 	}
@@ -292,7 +304,7 @@ void initApplication(SDL_Window* window) {
 									vertexAttributeDescriptions, ARRAY_COUNT(vertexAttributeDescriptions), &vertexInputBinding, 1, &spriteDescriptorLayout, 0);
 
 
-	VkVertexInputAttributeDescription modelAttributeDescriptions[2] = {};
+	VkVertexInputAttributeDescription modelAttributeDescriptions[3] = {};
 	modelAttributeDescriptions[0].binding = 0;
 	modelAttributeDescriptions[0].location = 0;
 	modelAttributeDescriptions[0].format = VK_FORMAT_R32G32B32_SFLOAT;
@@ -300,11 +312,15 @@ void initApplication(SDL_Window* window) {
 	modelAttributeDescriptions[1].binding = 0;
 	modelAttributeDescriptions[1].location = 1;
 	modelAttributeDescriptions[1].format = VK_FORMAT_R32G32B32_SFLOAT;
-	modelAttributeDescriptions[1].offset = 0;
+	modelAttributeDescriptions[1].offset = sizeof(float) * 3;
+	modelAttributeDescriptions[2].binding = 0;
+	modelAttributeDescriptions[2].location = 2;
+	modelAttributeDescriptions[2].format = VK_FORMAT_R32G32_SFLOAT;
+	modelAttributeDescriptions[2].offset = sizeof(float) * 6;
 	VkVertexInputBindingDescription modelInputBinding = {};
 	modelInputBinding.binding = 0;
 	modelInputBinding.inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
-	modelInputBinding.stride = sizeof(float) * 6;
+	modelInputBinding.stride = sizeof(float) * 8;
 	modelPipeline = createPipeline(context, "../shaders/model_vert.spv", "../shaders/model_frag.spv", renderPass, swapchain.width, swapchain.height,
 									modelAttributeDescriptions, ARRAY_COUNT(modelAttributeDescriptions), &modelInputBinding, 1, &modelDescriptorSetLayout, 0);
 
@@ -338,8 +354,6 @@ void initApplication(SDL_Window* window) {
 	
 	createBuffer(context, &spriteIndexBuffer, sizeof(indexData), VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
 	uploadDataToBuffer(context, &spriteIndexBuffer, indexData, sizeof(indexData));
-
-	model = createModel(context, "../data/models/monkey.glb");
 
 	{ // Init camera
 		camera.cameraPosition = glm::vec3(0.0f);
@@ -449,7 +463,7 @@ void renderApplication() {
 		vkCmdDrawIndexed(commandBuffer, ARRAY_COUNT(indexData), 1, 0, 0, 0);
 #else
 		glm::mat4 translationMatrix = glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, 0.0f, 3.0f));
-		glm::mat4 scaleMatrix = glm::scale(glm::mat4(1.0f), glm::vec3(1.0f));
+		glm::mat4 scaleMatrix = glm::scale(glm::mat4(1.0f), glm::vec3(100.0f));
 		glm::mat4 rotationMatrix = glm::rotate(glm::mat4(1.0f), -time, glm::vec3(0.0f, 1.0f, 0.0f));
 		glm::mat4 modelMatrix = translationMatrix * scaleMatrix * rotationMatrix;
 
