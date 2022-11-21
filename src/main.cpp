@@ -239,7 +239,7 @@ void initApplication(SDL_Window* window) {
 		VKA(vkCreateDescriptorPool(context->device, &createInfo, 0, &modelDescriptorPool));
 	}
 	for(uint32_t i = 0; i < FRAMES_IN_FLIGHT; ++i) {
-		createBuffer(context, &modelUniformBuffers[i], sizeof(glm::mat4), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+		createBuffer(context, &modelUniformBuffers[i], sizeof(glm::mat4)*2, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
 	}
 	{
 		VkDescriptorSetLayoutBinding bindings[] = {
@@ -258,7 +258,7 @@ void initApplication(SDL_Window* window) {
 			allocateInfo.pSetLayouts = &modelDescriptorSetLayout;
 			VKA(vkAllocateDescriptorSets(context->device, &allocateInfo, &modelDescriptorSets[i]));
 
-			VkDescriptorBufferInfo bufferInfo = {modelUniformBuffers[i].buffer, 0, sizeof(glm::mat4)};
+			VkDescriptorBufferInfo bufferInfo = {modelUniformBuffers[i].buffer, 0, sizeof(glm::mat4)*2};
 			VkDescriptorImageInfo imageInfo = {sampler, model.albedoTexture.view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
 			VkWriteDescriptorSet descriptorWrites[2];
 			descriptorWrites[0] = {VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET};
@@ -468,10 +468,12 @@ void renderApplication() {
 		glm::mat4 modelMatrix = translationMatrix * scaleMatrix * rotationMatrix;
 
 		glm::mat4 modelViewProj = camera.viewProj * modelMatrix;
+		glm::mat4 modelView = camera.view * modelMatrix;
 
 		void* mapped;
-		VK(vkMapMemory(context->device, modelUniformBuffers[frameIndex].memory, 0, sizeof(glm::mat4), 0, &mapped));
+		VK(vkMapMemory(context->device, modelUniformBuffers[frameIndex].memory, 0, sizeof(glm::mat4)*2, 0, &mapped));
 		memcpy(mapped, &modelViewProj, sizeof(modelViewProj));
+		memcpy(((uint8_t*)mapped)+sizeof(glm::mat4), &modelView, sizeof(modelView));
 		VK(vkUnmapMemory(context->device, modelUniformBuffers[frameIndex].memory));
 
 		vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, modelPipeline.pipeline);
