@@ -13,6 +13,10 @@
 #include "vulkan_base/vulkan_base.h"
 #include "model.h"
 
+#include <imgui.h>
+#include <backends/imgui_impl_sdl.h>
+#include <backends/imgui_impl_vulkan.h>
+
 #define FRAMES_IN_FLIGHT 2
 
 VulkanContext* context;
@@ -46,6 +50,8 @@ VulkanBuffer modelUniformBuffers[FRAMES_IN_FLIGHT];
 
 VkQueryPool timestampQueryPools[FRAMES_IN_FLIGHT];
 
+VkDescriptorPool imguiDescriptorPool;
+
 struct Camera {
 	glm::vec3 cameraPosition;
 	glm::vec3 cameraDirection;
@@ -58,17 +64,21 @@ struct Camera {
 } camera;
 
 bool handleMessage() {
+	ImGuiIO& io = ImGui::GetIO();
+
 	SDL_Event event;
 	while (SDL_PollEvent(&event)) {
+		ImGui_ImplSDL2_ProcessEvent(&event);
+
 		switch (event.type) {
 		case SDL_QUIT:
 			return false;
 		case SDL_KEYDOWN:
-			if(event.key.keysym.scancode == SDL_SCANCODE_ESCAPE) {
+			if(event.key.keysym.scancode == SDL_SCANCODE_ESCAPE && !io.WantCaptureKeyboard) {
 				SDL_SetRelativeMouseMode(SDL_FALSE);
 			}
 		case SDL_MOUSEBUTTONDOWN:
-			if(event.button.button == SDL_BUTTON_LEFT) {
+			if(event.button.button == SDL_BUTTON_LEFT && !io.WantCaptureMouse) {
 				SDL_SetRelativeMouseMode(SDL_TRUE);
 			}
 			break;
@@ -362,6 +372,69 @@ void initApplication(SDL_Window* window) {
 		camera.yaw = 0.0f;
 		camera.pitch = 0.0f;
 	}
+
+	// Init ImGui
+	{
+		VkDescriptorPoolSize poolSizes[] = {
+            { VK_DESCRIPTOR_TYPE_SAMPLER, 1000 },
+            { VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1000 },
+            { VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, 1000 },
+            { VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1000 },
+            { VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER, 1000 },
+            { VK_DESCRIPTOR_TYPE_STORAGE_TEXEL_BUFFER, 1000 },
+            { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1000 },
+            { VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1000 },
+            { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC, 1000 },
+            { VK_DESCRIPTOR_TYPE_STORAGE_BUFFER_DYNAMIC, 1000 },
+            { VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT, 1000 }
+        };
+		VkDescriptorPoolCreateInfo poolInfo = {};
+        poolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+        poolInfo.flags = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;
+        poolInfo.maxSets = 1000 * ARRAY_COUNT(poolSizes);
+        poolInfo.poolSizeCount = (uint32_t)ARRAY_COUNT(poolSizes);
+        poolInfo.pPoolSizes = poolSizes;
+        VKA(vkCreateDescriptorPool(context->device, &poolInfo, 0, &imguiDescriptorPool));
+	}
+	ImGui::CreateContext();
+	ImGui::StyleColorsDark();
+	ImGui_ImplSDL2_InitForVulkan(window);
+	ImGui_ImplVulkan_InitInfo initInfo = {};
+	initInfo.Instance = context->instance;
+	initInfo.PhysicalDevice = context->physicalDevice;
+	initInfo.Device = context->device;
+	initInfo.QueueFamily = context->graphicsQueue.familyIndex;
+	initInfo.Queue = context->graphicsQueue.queue;
+	initInfo.DescriptorPool = imguiDescriptorPool;
+	initInfo.MinImageCount = 2;
+	initInfo.ImageCount = swapchain.images.size();
+	initInfo.MSAASamples = VK_SAMPLE_COUNT_4_BIT;
+	ImGui_ImplVulkan_Init(&initInfo, renderPass);
+	// Upload Fonts
+    {
+        // Use any command queue
+        VkCommandPool commandPool = commandPools[0];
+        VkCommandBuffer commandBuffer = commandBuffers[0];
+
+        VKA(vkResetCommandPool(context->device, commandPool, 0));
+        VkCommandBufferBeginInfo begin_info = {};
+        begin_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+        begin_info.flags |= VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+        VKA(vkBeginCommandBuffer(commandBuffer, &begin_info));
+
+        ImGui_ImplVulkan_CreateFontsTexture(commandBuffer);
+
+		VKA(vkEndCommandBuffer(commandBuffer));
+
+        VkSubmitInfo submitInfo = {};
+        submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+        submitInfo.commandBufferCount = 1;
+        submitInfo.pCommandBuffers = &commandBuffer;
+        VKA(vkQueueSubmit(context->graphicsQueue.queue, 1, &submitInfo, VK_NULL_HANDLE));
+
+        VKA(vkDeviceWaitIdle(context->device));
+        ImGui_ImplVulkan_DestroyFontUploadObjects();
+    }
 }
 
 void recreateSwapchain() {
@@ -484,6 +557,10 @@ void renderApplication() {
 		vkCmdDrawIndexed(commandBuffer, model.numIndices, 1, 0, 0, 0);
 #endif
 
+		ImGui::Render();
+		ImDrawData* drawData = ImGui::GetDrawData();
+		ImGui_ImplVulkan_RenderDrawData(drawData, commandBuffer);
+
 		vkCmdEndRenderPass(commandBuffer);
 
 		VK(vkCmdWriteTimestamp(commandBuffer, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, timestampQueryPools[frameIndex], 1));
@@ -521,6 +598,12 @@ void renderApplication() {
 
 void shutdownApplication() {
 	VKA(vkDeviceWaitIdle(context->device));
+
+	// Destroy ImGui
+	ImGui_ImplVulkan_Shutdown();
+	VK(vkDestroyDescriptorPool(context->device, imguiDescriptorPool, 0));
+	ImGui_ImplSDL2_Shutdown();
+	ImGui::DestroyContext();
 
 	VK(vkDestroyDescriptorPool(context->device, modelDescriptorPool, 0));
 	VK(vkDestroyDescriptorSetLayout(context->device, modelDescriptorSetLayout, 0));
@@ -572,6 +655,10 @@ void shutdownApplication() {
 }
 
 void updateApplication(float delta) {
+	ImGui_ImplVulkan_NewFrame();
+	ImGui_ImplSDL2_NewFrame();
+	ImGui::NewFrame();
+
 	const uint8_t* keys = SDL_GetKeyboardState(0);
 	int mouseX, mouseY;
 	uint32_t mouseButtons = SDL_GetRelativeMouseState(&mouseX, &mouseY);
@@ -613,6 +700,11 @@ void updateApplication(float delta) {
 	camera.proj = getProjectionInverseZ(glm::radians(45.0f), swapchain.width, swapchain.height, 0.01f);
 	camera.view = glm::lookAtLH(camera.cameraPosition, camera.cameraPosition + camera.cameraDirection, camera.up);
 	camera.viewProj = camera.proj * camera.view;
+
+	static bool showDemoWindow = true;
+	if(showDemoWindow) {
+		ImGui::ShowDemoWindow(&showDemoWindow);
+	}
 }
 
 int main() {

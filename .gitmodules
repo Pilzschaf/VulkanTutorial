@@ -13,3 +13,6 @@
 [submodule "libs/glTF-Sample-Models"]
 	path = libs/glTF-Sample-Models
 	url = https://github.com/KhronosGroup/glTF-Sample-Models.git
+[submodule "libs/imgui"]
+	path = libs/imgui
+	url = https://github.com/ocornut/imgui.git
