@@ -46,6 +46,7 @@ VulkanPipeline modelPipeline;
 VkDescriptorSetLayout modelDescriptorSetLayout;
 VkDescriptorPool modelDescriptorPool;
 VkDescriptorSet modelDescriptorSets[FRAMES_IN_FLIGHT];
+uint64_t singleElementSize;
 VulkanBuffer modelUniformBuffers[FRAMES_IN_FLIGHT];
 
 VkQueryPool timestampQueryPools[FRAMES_IN_FLIGHT];
@@ -239,7 +240,7 @@ void initApplication(SDL_Window* window) {
 
 	{
 		VkDescriptorPoolSize poolSizes[] = {
-			{VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, FRAMES_IN_FLIGHT},
+			{VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC, FRAMES_IN_FLIGHT},
 			{VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, FRAMES_IN_FLIGHT},
 		};
 		VkDescriptorPoolCreateInfo createInfo = {VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO};
@@ -249,11 +250,13 @@ void initApplication(SDL_Window* window) {
 		VKA(vkCreateDescriptorPool(context->device, &createInfo, 0, &modelDescriptorPool));
 	}
 	for(uint32_t i = 0; i < FRAMES_IN_FLIGHT; ++i) {
-		createBuffer(context, &modelUniformBuffers[i], sizeof(glm::mat4)*2, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+		uint64_t minUniformAlignment = context->physicalDeviceProperties.limits.minUniformBufferOffsetAlignment;
+		singleElementSize = ALIGN_UP_POW2(sizeof(glm::mat4)*2, minUniformAlignment);
+		createBuffer(context, &modelUniformBuffers[i], singleElementSize*2, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
 	}
 	{
 		VkDescriptorSetLayoutBinding bindings[] = {
-			{0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1, VK_SHADER_STAGE_VERTEX_BIT, 0},
+			{0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC, 1, VK_SHADER_STAGE_VERTEX_BIT, 0},
 			{1, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1, VK_SHADER_STAGE_FRAGMENT_BIT, &sampler},
 		};
 		VkDescriptorSetLayoutCreateInfo createInfo = {VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO};
@@ -275,7 +278,7 @@ void initApplication(SDL_Window* window) {
 			descriptorWrites[0].dstSet = modelDescriptorSets[i];
 			descriptorWrites[0].dstBinding = 0;
 			descriptorWrites[0].descriptorCount = 1;
-			descriptorWrites[0].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+			descriptorWrites[0].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC;
 			descriptorWrites[0].pBufferInfo = &bufferInfo;
 			descriptorWrites[1] = {VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET};
 			descriptorWrites[1].dstSet = modelDescriptorSets[i];
@@ -480,13 +483,17 @@ void renderApplication() {
 	VKA(vkWaitForFences(context->device, 1, &fences[frameIndex], VK_TRUE, UINT64_MAX));
 
 	VkResult result = VK(vkAcquireNextImageKHR(context->device, swapchain.swapchain, UINT64_MAX, acquireSemaphores[frameIndex], 0, &imageIndex));
-	if(result == VK_ERROR_OUT_OF_DATE_KHR || result == VK_SUBOPTIMAL_KHR) {
+	if(result == VK_ERROR_OUT_OF_DATE_KHR) {
+		// ImGui still expects us to call render so we still do this here
+		ImGui::Render();
 		// Swapchain is out of date
 		recreateSwapchain();
 		return;
 	} else {
 		VKA(vkResetFences(context->device, 1, &fences[frameIndex]));
-		ASSERT_VULKAN(result);
+		if(result != VK_SUBOPTIMAL_KHR) {
+			ASSERT_VULKAN(result);
+		}
 	}
 
 	// Query timestamps
@@ -496,7 +503,7 @@ void renderApplication() {
 		double frameGpuBegin = double(timestamps[0]) * context->physicalDeviceProperties.limits.timestampPeriod * 1e-6;
 		double frameGpuEnd = double(timestamps[1]) * context->physicalDeviceProperties.limits.timestampPeriod * 1e-6;
 		frameGpuAvg = frameGpuAvg * 0.95 + (frameGpuEnd - frameGpuBegin) * 0.05;
-		LOG_INFO("GPU frametime: ", frameGpuAvg, "ms");
+		//LOG_INFO("GPU frametime: ", frameGpuAvg, "ms");
 	}
 
 	VKA(vkResetCommandPool(context->device, commandPools[frameIndex], 0));
@@ -535,7 +542,7 @@ void renderApplication() {
 		vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, spritePipeline.pipelineLayout, 0, 1, &spriteDescriptorSet, 0, 0);
 		vkCmdDrawIndexed(commandBuffer, ARRAY_COUNT(indexData), 1, 0, 0, 0);
 #else
-		glm::mat4 translationMatrix = glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, 0.0f, 3.0f));
+		glm::mat4 translationMatrix = glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, 0.0f, 2.0f));
 		glm::mat4 scaleMatrix = glm::scale(glm::mat4(1.0f), glm::vec3(100.0f));
 		glm::mat4 rotationMatrix = glm::rotate(glm::mat4(1.0f), -time, glm::vec3(0.0f, 1.0f, 0.0f));
 		glm::mat4 modelMatrix = translationMatrix * scaleMatrix * rotationMatrix;
@@ -547,14 +554,30 @@ void renderApplication() {
 		VK(vkMapMemory(context->device, modelUniformBuffers[frameIndex].memory, 0, sizeof(glm::mat4)*2, 0, &mapped));
 		memcpy(mapped, &modelViewProj, sizeof(modelViewProj));
 		memcpy(((uint8_t*)mapped)+sizeof(glm::mat4), &modelView, sizeof(modelView));
-		VK(vkUnmapMemory(context->device, modelUniformBuffers[frameIndex].memory));
 
 		vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, modelPipeline.pipeline);
 		VkDeviceSize offset = 0;
 		vkCmdBindVertexBuffers(commandBuffer, 0, 1, &model.vertexBuffer.buffer, &offset);
 		vkCmdBindIndexBuffer(commandBuffer, model.indexBuffer.buffer, 0, VK_INDEX_TYPE_UINT16);
-		vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, modelPipeline.pipelineLayout, 0, 1, &modelDescriptorSets[frameIndex], 0, 0);
+		uint32_t dynamicOffset = 0;
+		vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, modelPipeline.pipelineLayout, 0, 1, &modelDescriptorSets[frameIndex], 1, &dynamicOffset);
 		vkCmdDrawIndexed(commandBuffer, model.numIndices, 1, 0, 0, 0);
+
+
+		// Second instance
+		modelMatrix = glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, 0.0f, 5.0f)) * scaleMatrix * rotationMatrix;
+		modelViewProj = camera.viewProj * modelMatrix;
+		modelView = camera.view * modelMatrix;
+
+		mapped = ((uint8_t*)mapped) + singleElementSize;
+		memcpy(mapped, &modelViewProj, sizeof(modelViewProj));
+		memcpy(((uint8_t*)mapped)+sizeof(glm::mat4), &modelView, sizeof(modelView));
+
+		dynamicOffset = singleElementSize;
+		vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, modelPipeline.pipelineLayout, 0, 1, &modelDescriptorSets[frameIndex], 1, &dynamicOffset);
+		vkCmdDrawIndexed(commandBuffer, model.numIndices, 1, 0, 0, 0);
+
+		VK(vkUnmapMemory(context->device, modelUniformBuffers[frameIndex].memory));
 #endif
 
 		ImGui::Render();

@@ -15,6 +15,7 @@
 #endif
 
 #define ARRAY_COUNT(array) (sizeof(array) / sizeof((array)[0]))
+#define ALIGN_UP_POW2(x, p) (((x)+(p) - 1) &~((p) - 1))
 
 struct VulkanQueue {
 	VkQueue queue;
