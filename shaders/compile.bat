@@ -6,3 +6,5 @@ glslc.exe -fshader-stage=vert texture_vert.glsl -o texture_vert.spv
 glslc.exe -fshader-stage=frag texture_frag.glsl -o texture_frag.spv
 glslc.exe -fshader-stage=vert model_vert.glsl -o model_vert.spv
 glslc.exe -fshader-stage=frag model_frag.glsl -o model_frag.spv
+glslc.exe -fshader-stage=vert postprocess_vert.glsl -o postprocess_vert.spv
+glslc.exe -fshader-stage=frag postprocess_frag.glsl -o postprocess_frag.spv

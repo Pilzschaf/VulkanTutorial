@@ -29,6 +29,7 @@ VkRenderPass createRenderPass(VulkanContext* context, VkFormat format, VkSampleC
 	VkAttachmentReference attachmentReference = { 0, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL };
 	VkAttachmentReference depthStencilReference = {1, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL};
 	VkAttachmentReference resolveTargetReference = {2, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL };
+	VkAttachmentReference postprocessTargetReference = {2, VK_IMAGE_LAYOUT_GENERAL};
 
 	VkSubpassDescription subpass = {};
 	subpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
@@ -37,11 +38,29 @@ VkRenderPass createRenderPass(VulkanContext* context, VkFormat format, VkSampleC
 	subpass.pDepthStencilAttachment = &depthStencilReference;
 	subpass.pResolveAttachments = &resolveTargetReference;
 
+	VkSubpassDescription postProcessSubpass = {};
+	postProcessSubpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
+	postProcessSubpass.colorAttachmentCount = 1;
+	postProcessSubpass.pColorAttachments = &postprocessTargetReference;
+	postProcessSubpass.inputAttachmentCount = 1;
+	postProcessSubpass.pInputAttachments = &postprocessTargetReference;
+
+	VkSubpassDescription subpasses[] = {subpass, postProcessSubpass};
+	VkSubpassDependency subpassDependency = {};
+	subpassDependency.srcSubpass = 0;
+	subpassDependency.srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+	subpassDependency.srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+	subpassDependency.dstSubpass = 1;
+	subpassDependency.dstStageMask = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
+	subpassDependency.dstAccessMask = VK_ACCESS_INPUT_ATTACHMENT_READ_BIT;
+
 	VkRenderPassCreateInfo createInfo = { VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO };
 	createInfo.attachmentCount = ARRAY_COUNT(attachmentDescriptions);
 	createInfo.pAttachments = attachmentDescriptions;
-	createInfo.subpassCount = 1;
-	createInfo.pSubpasses = &subpass;
+	createInfo.subpassCount = ARRAY_COUNT(subpasses);
+	createInfo.pSubpasses = subpasses;
+	createInfo.dependencyCount = 1;
+	createInfo.pDependencies = &subpassDependency;
 	VKA(vkCreateRenderPass(context->device, &createInfo, 0, &renderPass));
 
 	return renderPass;

@@ -49,6 +49,10 @@ VkDescriptorSet modelDescriptorSets[FRAMES_IN_FLIGHT];
 uint64_t singleElementSize;
 VulkanBuffer modelUniformBuffers[FRAMES_IN_FLIGHT];
 
+VulkanPipeline postprocessPipeline;
+VkDescriptorSetLayout postprocessDescriptorSetLayout;
+VkDescriptorSet postprocessDescriptorSets[FRAMES_IN_FLIGHT];
+
 VkQueryPool timestampQueryPools[FRAMES_IN_FLIGHT];
 
 VkDescriptorPool imguiDescriptorPool;
@@ -168,7 +172,7 @@ void initApplication(SDL_Window* window) {
 	context = initVulkan(instanceExtensionCount, enabledInstanceExtensions, ARRAY_COUNT(enabledDeviceExtensions), enabledDeviceExtensions);
 	
 	SDL_Vulkan_CreateSurface(window, context->instance, &surface);
-	swapchain = createSwapchain(context, surface, VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT);
+	swapchain = createSwapchain(context, surface, VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_INPUT_ATTACHMENT_BIT);
 
 	recreateRenderPass();
 
@@ -242,9 +246,10 @@ void initApplication(SDL_Window* window) {
 		VkDescriptorPoolSize poolSizes[] = {
 			{VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC, FRAMES_IN_FLIGHT},
 			{VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, FRAMES_IN_FLIGHT},
+			{VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT, FRAMES_IN_FLIGHT},
 		};
 		VkDescriptorPoolCreateInfo createInfo = {VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO};
-		createInfo.maxSets = FRAMES_IN_FLIGHT;
+		createInfo.maxSets = FRAMES_IN_FLIGHT * 2;
 		createInfo.poolSizeCount = ARRAY_COUNT(poolSizes);
 		createInfo.pPoolSizes = poolSizes;
 		VKA(vkCreateDescriptorPool(context->device, &createInfo, 0, &modelDescriptorPool));
@@ -289,6 +294,23 @@ void initApplication(SDL_Window* window) {
 			VK(vkUpdateDescriptorSets(context->device, ARRAY_COUNT(descriptorWrites), descriptorWrites, 0, 0));
 		}
 	}
+	{
+		VkDescriptorSetLayoutBinding bindings[] = {
+			{0, VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT, 1, VK_SHADER_STAGE_FRAGMENT_BIT, 0},
+		};
+		VkDescriptorSetLayoutCreateInfo createInfo = {VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO};
+		createInfo.bindingCount = ARRAY_COUNT(bindings);
+		createInfo.pBindings = bindings;
+		VKA(vkCreateDescriptorSetLayout(context->device, &createInfo, 0, &postprocessDescriptorSetLayout));
+
+		for(uint32_t i = 0; i < FRAMES_IN_FLIGHT; ++i) {
+			VkDescriptorSetAllocateInfo allocateInfo = {VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO};
+			allocateInfo.descriptorPool = modelDescriptorPool;
+			allocateInfo.descriptorSetCount = 1;
+			allocateInfo.pSetLayouts = &postprocessDescriptorSetLayout;
+			VKA(vkAllocateDescriptorSets(context->device, &allocateInfo, &postprocessDescriptorSets[i]));
+		}
+	}
 	for(uint32_t i = 0; i < FRAMES_IN_FLIGHT; ++i) {
 		VkQueryPoolCreateInfo createInfo = {VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO};
 		createInfo.queryType = VK_QUERY_TYPE_TIMESTAMP;
@@ -314,7 +336,7 @@ void initApplication(SDL_Window* window) {
 	vertexInputBinding.inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
 	vertexInputBinding.stride = sizeof(float) * 7;
 	spritePipeline = createPipeline(context, "../shaders/texture_vert.spv", "../shaders/texture_frag.spv", renderPass, swapchain.width, swapchain.height, 
-									vertexAttributeDescriptions, ARRAY_COUNT(vertexAttributeDescriptions), &vertexInputBinding, 1, &spriteDescriptorLayout, 0);
+									vertexAttributeDescriptions, ARRAY_COUNT(vertexAttributeDescriptions), &vertexInputBinding, 1, &spriteDescriptorLayout, 0, 0, VK_SAMPLE_COUNT_4_BIT);
 
 
 	VkVertexInputAttributeDescription modelAttributeDescriptions[3] = {};
@@ -335,7 +357,10 @@ void initApplication(SDL_Window* window) {
 	modelInputBinding.inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
 	modelInputBinding.stride = sizeof(float) * 8;
 	modelPipeline = createPipeline(context, "../shaders/model_vert.spv", "../shaders/model_frag.spv", renderPass, swapchain.width, swapchain.height,
-									modelAttributeDescriptions, ARRAY_COUNT(modelAttributeDescriptions), &modelInputBinding, 1, &modelDescriptorSetLayout, 0);
+									modelAttributeDescriptions, ARRAY_COUNT(modelAttributeDescriptions), &modelInputBinding, 1, &modelDescriptorSetLayout, 0, 0, VK_SAMPLE_COUNT_4_BIT);
+
+	postprocessPipeline = createPipeline(context, "../shaders/postprocess_vert.spv", "../shaders/postprocess_frag.spv", renderPass, swapchain.width, swapchain.height,
+									0, 0, 0, 1, &postprocessDescriptorSetLayout, 0, 1);
 
 	for(uint32_t i = 0; i < ARRAY_COUNT(fences); ++i) {
 		VkFenceCreateInfo createInfo = { VK_STRUCTURE_TYPE_FENCE_CREATE_INFO };
@@ -584,6 +609,22 @@ void renderApplication() {
 		ImDrawData* drawData = ImGui::GetDrawData();
 		ImGui_ImplVulkan_RenderDrawData(drawData, commandBuffer);
 
+		// Postprocessing subpass
+		VkDescriptorImageInfo imageInfo = {0, swapchain.imageViews[imageIndex], VK_IMAGE_LAYOUT_GENERAL};
+		VkWriteDescriptorSet descriptorWrite;
+		descriptorWrite = {VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET};
+		descriptorWrite.dstSet = postprocessDescriptorSets[frameIndex];
+		descriptorWrite.dstBinding = 0;
+		descriptorWrite.descriptorCount = 1;
+		descriptorWrite.descriptorType = VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT;
+		descriptorWrite.pImageInfo = &imageInfo;
+		VK(vkUpdateDescriptorSets(context->device, 1, &descriptorWrite, 0, 0));
+		vkCmdNextSubpass(commandBuffer, VK_SUBPASS_CONTENTS_INLINE);
+
+		vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, postprocessPipeline.pipeline);
+		vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, postprocessPipeline.pipelineLayout, 0, 1, &postprocessDescriptorSets[frameIndex], 0, 0);
+		vkCmdDraw(commandBuffer, 3, 1, 0, 0);
+
 		vkCmdEndRenderPass(commandBuffer);
 
 		VK(vkCmdWriteTimestamp(commandBuffer, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, timestampQueryPools[frameIndex], 1));
@@ -634,6 +675,7 @@ void shutdownApplication() {
 	for(uint32_t i = 0; i < FRAMES_IN_FLIGHT; ++i) {
 		destroyBuffer(context, &modelUniformBuffers[i]);
 	}
+	VK(vkDestroyDescriptorSetLayout(context->device, postprocessDescriptorSetLayout, 0));
 
 	for(uint32_t i = 0; i < FRAMES_IN_FLIGHT; ++i) {
 		vkDestroyQueryPool(context->device, timestampQueryPools[i], 0);
@@ -656,6 +698,7 @@ void shutdownApplication() {
 
 	destroyPipeline(context, &spritePipeline);
 	destroyPipeline(context, &modelPipeline);
+	destroyPipeline(context, &postprocessPipeline);
 
 	vkDestroySampler(context->device, sampler, 0);
 

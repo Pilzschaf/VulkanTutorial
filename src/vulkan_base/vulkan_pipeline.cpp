@@ -28,7 +28,7 @@ VkShaderModule createShaderModule(VulkanContext* context, const char* shaderFile
 }
 
 VulkanPipeline createPipeline(VulkanContext* context, const char* vertexShaderFilename, const char* fragmentShaderFilename, VkRenderPass renderPass, uint32_t width, uint32_t height,
-							  VkVertexInputAttributeDescription* attributes, uint32_t numAttributes, VkVertexInputBindingDescription* binding, uint32_t numSetLayouts, VkDescriptorSetLayout* setLayouts, VkPushConstantRange* pushConstant) {
+							  VkVertexInputAttributeDescription* attributes, uint32_t numAttributes, VkVertexInputBindingDescription* binding, uint32_t numSetLayouts, VkDescriptorSetLayout* setLayouts, VkPushConstantRange* pushConstant, uint32_t subpassIndex, VkSampleCountFlagBits sampleCount) {
 	VkShaderModule vertexShaderModule = createShaderModule(context, vertexShaderFilename);
 	VkShaderModule fragmentShaderModule = createShaderModule(context, fragmentShaderFilename);
 
@@ -63,7 +63,7 @@ VulkanPipeline createPipeline(VulkanContext* context, const char* vertexShaderFi
 	rasterizationState.lineWidth = 1.0f;
 
 	VkPipelineMultisampleStateCreateInfo multisampleState = { VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO };
-	multisampleState.rasterizationSamples = VK_SAMPLE_COUNT_4_BIT;
+	multisampleState.rasterizationSamples = sampleCount;
 
 	VkPipelineDepthStencilStateCreateInfo depthStencilState = {VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO};
 	depthStencilState.depthTestEnable = VK_TRUE;
@@ -115,7 +115,7 @@ VulkanPipeline createPipeline(VulkanContext* context, const char* vertexShaderFi
 		createInfo.pDynamicState = &dynamicState;
 		createInfo.layout = pipelineLayout;
 		createInfo.renderPass = renderPass;
-		createInfo.subpass = 0;
+		createInfo.subpass = subpassIndex;
 		VKA(vkCreateGraphicsPipelines(context->device, 0, 1, &createInfo, 0, &pipeline));
 	}
 
