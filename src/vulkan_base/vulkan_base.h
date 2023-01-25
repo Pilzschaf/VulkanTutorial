@@ -62,7 +62,7 @@ void exitVulkan(VulkanContext* context);
 VulkanSwapchain createSwapchain(VulkanContext* context, VkSurfaceKHR surface, VkImageUsageFlags usage, VulkanSwapchain* oldSwapchain = 0);
 void destroySwapchain(VulkanContext* context, VulkanSwapchain* swapchain);
 
-VkRenderPass createRenderPass(VulkanContext* context, VkFormat format, VkSampleCountFlagBits sampleCount);
+VkRenderPass createRenderPass(VulkanContext* context, VkFormat format, VkSampleCountFlagBits sampleCount, bool useDepth, VkImageLayout finalLayout);
 void destroyRenderpass(VulkanContext* context, VkRenderPass renderPass);
 
 void createBuffer(VulkanContext* context, VulkanBuffer* buffer, uint64_t size, VkBufferUsageFlags usage, VkMemoryPropertyFlags memoryProperties);
@@ -74,5 +74,5 @@ void uploadDataToImage(VulkanContext* context, VulkanImage* image, void* data, s
 void destroyImage(VulkanContext* context, VulkanImage* image);
 
 VulkanPipeline createPipeline(VulkanContext* context, const char* vertexShaderFilename, const char* fragmentShaderFilename, VkRenderPass renderPass, uint32_t width, uint32_t height,
-							  VkVertexInputAttributeDescription* attributes, uint32_t numAttributes, VkVertexInputBindingDescription* binding, uint32_t numSetLayouts, VkDescriptorSetLayout* setLayouts, VkPushConstantRange* pushConstant, uint32_t subpassIndex = 0, VkSampleCountFlagBits sampleCount = VK_SAMPLE_COUNT_1_BIT);
+							  VkVertexInputAttributeDescription* attributes, uint32_t numAttributes, VkVertexInputBindingDescription* binding, uint32_t numSetLayouts, VkDescriptorSetLayout* setLayouts, VkPushConstantRange* pushConstant, uint32_t subpassIndex = 0, VkSampleCountFlagBits sampleCount = VK_SAMPLE_COUNT_1_BIT, VkSpecializationInfo* specializationInfo = 0);
 void destroyPipeline(VulkanContext* context, VulkanPipeline* pipeline);

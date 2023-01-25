@@ -28,7 +28,7 @@ VkShaderModule createShaderModule(VulkanContext* context, const char* shaderFile
 }
 
 VulkanPipeline createPipeline(VulkanContext* context, const char* vertexShaderFilename, const char* fragmentShaderFilename, VkRenderPass renderPass, uint32_t width, uint32_t height,
-							  VkVertexInputAttributeDescription* attributes, uint32_t numAttributes, VkVertexInputBindingDescription* binding, uint32_t numSetLayouts, VkDescriptorSetLayout* setLayouts, VkPushConstantRange* pushConstant, uint32_t subpassIndex, VkSampleCountFlagBits sampleCount) {
+							  VkVertexInputAttributeDescription* attributes, uint32_t numAttributes, VkVertexInputBindingDescription* binding, uint32_t numSetLayouts, VkDescriptorSetLayout* setLayouts, VkPushConstantRange* pushConstant, uint32_t subpassIndex, VkSampleCountFlagBits sampleCount, VkSpecializationInfo* specializationInfo) {
 	VkShaderModule vertexShaderModule = createShaderModule(context, vertexShaderFilename);
 	VkShaderModule fragmentShaderModule = createShaderModule(context, fragmentShaderFilename);
 
@@ -37,10 +37,12 @@ VulkanPipeline createPipeline(VulkanContext* context, const char* vertexShaderFi
 	shaderStages[0].stage = VK_SHADER_STAGE_VERTEX_BIT;
 	shaderStages[0].module = vertexShaderModule;
 	shaderStages[0].pName = "main";
+	shaderStages[0].pSpecializationInfo = specializationInfo;
 	shaderStages[1] = { VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO };
 	shaderStages[1].stage = VK_SHADER_STAGE_FRAGMENT_BIT;
 	shaderStages[1].module = fragmentShaderModule;
 	shaderStages[1].pName = "main";
+	shaderStages[1].pSpecializationInfo = specializationInfo;
 
 	VkPipelineVertexInputStateCreateInfo vertexInputState = { VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO };
 	vertexInputState.vertexBindingDescriptionCount = binding ? 1 : 0;

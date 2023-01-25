@@ -25,7 +25,11 @@ VulkanSwapchain swapchain;
 VkRenderPass renderPass;
 std::vector<VulkanImage> depthBuffers;
 std::vector<VulkanImage> colorBuffers;
-std::vector<VkFramebuffer> framebuffers;
+std::vector<VulkanImage> multisampleTargetBuffers;
+std::vector<VulkanImage> gaussBuffers;
+std::vector<VkFramebuffer> sceneFramebuffers;
+std::vector<VkFramebuffer> gaussFramebuffers;
+std::vector<VkFramebuffer> swapchainFramebuffers;
 VkCommandPool commandPools[FRAMES_IN_FLIGHT];
 VkCommandBuffer commandBuffers[FRAMES_IN_FLIGHT];
 VkFence fences[FRAMES_IN_FLIGHT];
@@ -49,9 +53,15 @@ VkDescriptorSet modelDescriptorSets[FRAMES_IN_FLIGHT];
 uint64_t singleElementSize;
 VulkanBuffer modelUniformBuffers[FRAMES_IN_FLIGHT];
 
-VulkanPipeline postprocessPipeline;
-VkDescriptorSetLayout postprocessDescriptorSetLayout;
-VkDescriptorSet postprocessDescriptorSets[FRAMES_IN_FLIGHT];
+VulkanPipeline gaussPipelineVertical;
+VulkanPipeline gaussPipelineHorizontal;
+VkDescriptorSetLayout gaussDescriptorSetLayout;
+VkDescriptorPool gaussDescriptorPool;
+VkDescriptorSet gaussDescriptorSetsVertical[FRAMES_IN_FLIGHT];
+VkDescriptorSet gaussDescriptorSetsHorizontal[FRAMES_IN_FLIGHT];
+VkRenderPass gaussRenderPass;
+VkRenderPass gaussRenderPassFinal;
+VkSampler linearSampler;
 
 VkQueryPool timestampQueryPools[FRAMES_IN_FLIGHT];
 
@@ -94,8 +104,14 @@ bool handleMessage() {
 
 void recreateRenderPass() {
 	if(renderPass) {
-		for (uint32_t i = 0; i < framebuffers.size(); ++i) {
-			VK(vkDestroyFramebuffer(context->device, framebuffers[i], 0));
+		for (uint32_t i = 0; i < sceneFramebuffers.size(); ++i) {
+			VK(vkDestroyFramebuffer(context->device, sceneFramebuffers[i], 0));
+		}
+		for (uint32_t i = 0; i < sceneFramebuffers.size(); ++i) {
+			VK(vkDestroyFramebuffer(context->device, gaussFramebuffers[i], 0));
+		}
+		for (uint32_t i = 0; i < sceneFramebuffers.size(); ++i) {
+			VK(vkDestroyFramebuffer(context->device, swapchainFramebuffers[i], 0));
 		}
 		for(uint32_t i = 0; i < depthBuffers.size(); ++i) {
 			destroyImage(context, &depthBuffers[i]);
@@ -104,31 +120,67 @@ void recreateRenderPass() {
 			destroyImage(context, &colorBuffers[i]);
 		}
 		destroyRenderpass(context, renderPass);
+		destroyRenderpass(context, gaussRenderPass);
+		destroyRenderpass(context, gaussRenderPassFinal);
 	}
-	framebuffers.clear();
+	sceneFramebuffers.clear();
+	gaussFramebuffers.clear();
+	swapchainFramebuffers.clear();
 	depthBuffers.clear();
 	colorBuffers.clear();
+	multisampleTargetBuffers.clear();
+	gaussBuffers.clear();
 
-	renderPass = createRenderPass(context, swapchain.format, VK_SAMPLE_COUNT_4_BIT);
-	framebuffers.resize(swapchain.images.size());
+	renderPass = createRenderPass(context, swapchain.format, VK_SAMPLE_COUNT_4_BIT, true, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+	gaussRenderPass = createRenderPass(context, swapchain.format, VK_SAMPLE_COUNT_1_BIT, false, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+	gaussRenderPassFinal = createRenderPass(context, swapchain.format, VK_SAMPLE_COUNT_1_BIT, false, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
+	sceneFramebuffers.resize(swapchain.images.size());
+	gaussFramebuffers.resize(swapchain.images.size());
+	swapchainFramebuffers.resize(swapchain.images.size());
 	depthBuffers.resize(swapchain.images.size());
 	colorBuffers.resize(swapchain.images.size());
+	multisampleTargetBuffers.resize(swapchain.images.size());
+	gaussBuffers.resize(swapchain.images.size());
+
 	for (uint32_t i = 0; i < swapchain.images.size(); ++i) {
 		createImage(context, &depthBuffers.data()[i], swapchain.width, swapchain.height, VK_FORMAT_D32_SFLOAT, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT, VK_SAMPLE_COUNT_4_BIT);
-		createImage(context, &colorBuffers.data()[i], swapchain.width, swapchain.height, swapchain.format, VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT, VK_SAMPLE_COUNT_4_BIT);
-		VkImageView attachments[] = {
-			colorBuffers[i].view,
-			depthBuffers[i].view,
-			swapchain.imageViews[i],
-		};
+		createImage(context, &colorBuffers.data()[i], swapchain.width, swapchain.height, swapchain.format, VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT, VK_SAMPLE_COUNT_4_BIT);
+		createImage(context, &multisampleTargetBuffers.data()[i], swapchain.width, swapchain.height, swapchain.format, VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT);
+		createImage(context, &gaussBuffers.data()[i], swapchain.width, swapchain.height, swapchain.format, VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT);
+		
 		VkFramebufferCreateInfo createInfo = { VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO };
-		createInfo.renderPass = renderPass;
-		createInfo.attachmentCount = ARRAY_COUNT(attachments);
-		createInfo.pAttachments = attachments;
 		createInfo.width = swapchain.width;
 		createInfo.height = swapchain.height;
 		createInfo.layers = 1;
-		VKA(vkCreateFramebuffer(context->device, &createInfo, 0, &framebuffers[i]));
+		{
+			VkImageView attachments[] = {
+				colorBuffers[i].view,
+				depthBuffers[i].view,
+				multisampleTargetBuffers[i].view,
+			};
+			createInfo.renderPass = renderPass;
+			createInfo.attachmentCount = ARRAY_COUNT(attachments);
+			createInfo.pAttachments = attachments;
+			VKA(vkCreateFramebuffer(context->device, &createInfo, 0, &sceneFramebuffers[i]));
+		}
+		{
+			VkImageView attachments[] = {
+				gaussBuffers[i].view,
+			};
+			createInfo.renderPass = gaussRenderPass;
+			createInfo.attachmentCount = ARRAY_COUNT(attachments);
+			createInfo.pAttachments = attachments;
+			VKA(vkCreateFramebuffer(context->device, &createInfo, 0, &gaussFramebuffers[i]));
+		}
+		{
+			VkImageView attachments[] = {
+				swapchain.imageViews[i],
+			};
+			createInfo.renderPass = gaussRenderPassFinal;
+			createInfo.attachmentCount = ARRAY_COUNT(attachments);
+			createInfo.pAttachments = attachments;
+			VKA(vkCreateFramebuffer(context->device, &createInfo, 0, &swapchainFramebuffers[i]));
+		}
 	}
 }
 
@@ -172,7 +224,7 @@ void initApplication(SDL_Window* window) {
 	context = initVulkan(instanceExtensionCount, enabledInstanceExtensions, ARRAY_COUNT(enabledDeviceExtensions), enabledDeviceExtensions);
 	
 	SDL_Vulkan_CreateSurface(window, context->instance, &surface);
-	swapchain = createSwapchain(context, surface, VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_INPUT_ATTACHMENT_BIT);
+	swapchain = createSwapchain(context, surface, VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT);
 
 	recreateRenderPass();
 
@@ -192,6 +244,21 @@ void initApplication(SDL_Window* window) {
 		createInfo.minLod = 0.0f;
 		createInfo.maxLod = 1.0f;
 		VKA(vkCreateSampler(context->device, &createInfo, 0, &sampler));
+	}
+
+	{
+		VkSamplerCreateInfo createInfo = {VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO};
+		createInfo.magFilter = VK_FILTER_LINEAR;
+		createInfo.minFilter = VK_FILTER_LINEAR;
+		createInfo.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR;
+		createInfo.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+		createInfo.addressModeV = createInfo.addressModeU;
+		createInfo.addressModeW = createInfo.addressModeU;
+		createInfo.mipLodBias = 0.0f;
+		createInfo.maxAnisotropy = 1.0f;
+		createInfo.minLod = 0.0f;
+		createInfo.maxLod = 1.0f;
+		VKA(vkCreateSampler(context->device, &createInfo, 0, &linearSampler));
 	}
 
 	{
@@ -246,10 +313,9 @@ void initApplication(SDL_Window* window) {
 		VkDescriptorPoolSize poolSizes[] = {
 			{VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC, FRAMES_IN_FLIGHT},
 			{VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, FRAMES_IN_FLIGHT},
-			{VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT, FRAMES_IN_FLIGHT},
 		};
 		VkDescriptorPoolCreateInfo createInfo = {VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO};
-		createInfo.maxSets = FRAMES_IN_FLIGHT * 2;
+		createInfo.maxSets = FRAMES_IN_FLIGHT;
 		createInfo.poolSizeCount = ARRAY_COUNT(poolSizes);
 		createInfo.pPoolSizes = poolSizes;
 		VKA(vkCreateDescriptorPool(context->device, &createInfo, 0, &modelDescriptorPool));
@@ -292,23 +358,6 @@ void initApplication(SDL_Window* window) {
 			descriptorWrites[1].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
 			descriptorWrites[1].pImageInfo = &imageInfo;
 			VK(vkUpdateDescriptorSets(context->device, ARRAY_COUNT(descriptorWrites), descriptorWrites, 0, 0));
-		}
-	}
-	{
-		VkDescriptorSetLayoutBinding bindings[] = {
-			{0, VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT, 1, VK_SHADER_STAGE_FRAGMENT_BIT, 0},
-		};
-		VkDescriptorSetLayoutCreateInfo createInfo = {VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO};
-		createInfo.bindingCount = ARRAY_COUNT(bindings);
-		createInfo.pBindings = bindings;
-		VKA(vkCreateDescriptorSetLayout(context->device, &createInfo, 0, &postprocessDescriptorSetLayout));
-
-		for(uint32_t i = 0; i < FRAMES_IN_FLIGHT; ++i) {
-			VkDescriptorSetAllocateInfo allocateInfo = {VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO};
-			allocateInfo.descriptorPool = modelDescriptorPool;
-			allocateInfo.descriptorSetCount = 1;
-			allocateInfo.pSetLayouts = &postprocessDescriptorSetLayout;
-			VKA(vkAllocateDescriptorSets(context->device, &allocateInfo, &postprocessDescriptorSets[i]));
 		}
 	}
 	for(uint32_t i = 0; i < FRAMES_IN_FLIGHT; ++i) {
@@ -359,8 +408,54 @@ void initApplication(SDL_Window* window) {
 	modelPipeline = createPipeline(context, "../shaders/model_vert.spv", "../shaders/model_frag.spv", renderPass, swapchain.width, swapchain.height,
 									modelAttributeDescriptions, ARRAY_COUNT(modelAttributeDescriptions), &modelInputBinding, 1, &modelDescriptorSetLayout, 0, 0, VK_SAMPLE_COUNT_4_BIT);
 
-	postprocessPipeline = createPipeline(context, "../shaders/postprocess_vert.spv", "../shaders/postprocess_frag.spv", renderPass, swapchain.width, swapchain.height,
-									0, 0, 0, 1, &postprocessDescriptorSetLayout, 0, 1);
+	
+	// Preparations for Guassian Blur pass
+	{
+		VkDescriptorSetLayoutBinding bindings[] = {
+			{0, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1, VK_SHADER_STAGE_FRAGMENT_BIT, 0},
+		};
+		VkDescriptorSetLayoutCreateInfo createInfo = {VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO};
+		createInfo.bindingCount = ARRAY_COUNT(bindings);
+		createInfo.pBindings = bindings;
+		VKA(vkCreateDescriptorSetLayout(context->device, &createInfo, 0, &gaussDescriptorSetLayout));
+	}
+	{
+		VkDescriptorPoolSize poolSizes[] = {
+			{VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, FRAMES_IN_FLIGHT * 2},
+		};
+		VkDescriptorPoolCreateInfo createInfo = {VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO};
+		createInfo.maxSets = FRAMES_IN_FLIGHT * 2;
+		createInfo.poolSizeCount = ARRAY_COUNT(poolSizes);
+		createInfo.pPoolSizes = poolSizes;
+		VKA(vkCreateDescriptorPool(context->device, &createInfo, 0, &gaussDescriptorPool));
+		
+		for(uint32_t i = 0; i < FRAMES_IN_FLIGHT; ++i) {
+			VkDescriptorSetAllocateInfo allocateInfo = {VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO};
+			allocateInfo.descriptorPool = gaussDescriptorPool;
+			allocateInfo.descriptorSetCount = 1;
+			allocateInfo.pSetLayouts = &gaussDescriptorSetLayout;
+			VKA(vkAllocateDescriptorSets(context->device, &allocateInfo, &gaussDescriptorSetsVertical[i]));
+			VKA(vkAllocateDescriptorSets(context->device, &allocateInfo, &gaussDescriptorSetsHorizontal[i]));
+		}
+	}
+
+	VkPushConstantRange pushConstants = {};
+	pushConstants.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+	pushConstants.offset = 0;
+	pushConstants.size = sizeof(float);
+
+	int vertical = 1;
+	VkSpecializationMapEntry mapEntries[] = {
+		{0, 0, sizeof(vertical)},
+	};
+	VkSpecializationInfo specializationInfo = {};
+	specializationInfo.mapEntryCount = ARRAY_COUNT(mapEntries);
+	specializationInfo.pMapEntries = mapEntries;
+	specializationInfo.dataSize = sizeof(vertical);
+	specializationInfo.pData = &vertical;
+
+	gaussPipelineVertical = createPipeline(context, "../shaders/gaussian_vert.spv", "../shaders/gaussian_frag.spv", gaussRenderPass, swapchain.width, swapchain.height, 0, 0, 0, 1, &gaussDescriptorSetLayout, &pushConstants, 0, VK_SAMPLE_COUNT_1_BIT, &specializationInfo);
+	gaussPipelineHorizontal = createPipeline(context, "../shaders/gaussian_vert.spv", "../shaders/gaussian_frag.spv", gaussRenderPassFinal, swapchain.width, swapchain.height, 0, 0, 0, 1, &gaussDescriptorSetLayout, &pushConstants, 0, VK_SAMPLE_COUNT_1_BIT);
 
 	for(uint32_t i = 0; i < ARRAY_COUNT(fences); ++i) {
 		VkFenceCreateInfo createInfo = { VK_STRUCTURE_TYPE_FENCE_CREATE_INFO };
@@ -553,7 +648,7 @@ void renderApplication() {
 		};
 		VkRenderPassBeginInfo beginInfo = { VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO };
 		beginInfo.renderPass = renderPass;
-		beginInfo.framebuffer = framebuffers[imageIndex];
+		beginInfo.framebuffer = sceneFramebuffers[imageIndex];
 		beginInfo.renderArea = { {0, 0}, {swapchain.width, swapchain.height} };
 		beginInfo.clearValueCount = ARRAY_COUNT(clearValues);
 		beginInfo.pClearValues = clearValues;
@@ -609,22 +704,45 @@ void renderApplication() {
 		ImDrawData* drawData = ImGui::GetDrawData();
 		ImGui_ImplVulkan_RenderDrawData(drawData, commandBuffer);
 
-		// Postprocessing subpass
-		VkDescriptorImageInfo imageInfo = {0, swapchain.imageViews[imageIndex], VK_IMAGE_LAYOUT_GENERAL};
-		VkWriteDescriptorSet descriptorWrite;
-		descriptorWrite = {VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET};
-		descriptorWrite.dstSet = postprocessDescriptorSets[frameIndex];
+		vkCmdEndRenderPass(commandBuffer);
+
+		// Gauss vertical
+		beginInfo.renderPass = gaussRenderPass;
+		beginInfo.framebuffer = gaussFramebuffers[imageIndex];
+		vkCmdBeginRenderPass(commandBuffer, &beginInfo, VK_SUBPASS_CONTENTS_INLINE);
+		vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, gaussPipelineVertical.pipeline);
+		VkDescriptorImageInfo imageInfo = {linearSampler, multisampleTargetBuffers[imageIndex].view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
+		VkWriteDescriptorSet descriptorWrite = {VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET};
+		descriptorWrite.dstSet = gaussDescriptorSetsVertical[frameIndex];
 		descriptorWrite.dstBinding = 0;
 		descriptorWrite.descriptorCount = 1;
-		descriptorWrite.descriptorType = VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT;
+		descriptorWrite.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
 		descriptorWrite.pImageInfo = &imageInfo;
-		VK(vkUpdateDescriptorSets(context->device, 1, &descriptorWrite, 0, 0));
-		vkCmdNextSubpass(commandBuffer, VK_SUBPASS_CONTENTS_INLINE);
-
-		vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, postprocessPipeline.pipeline);
-		vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, postprocessPipeline.pipelineLayout, 0, 1, &postprocessDescriptorSets[frameIndex], 0, 0);
+		vkUpdateDescriptorSets(context->device, 1, &descriptorWrite, 0, 0);
+		vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, gaussPipelineVertical.pipelineLayout, 0, 1, &gaussDescriptorSetsVertical[frameIndex], 0, 0);
+		float pixelSize = 1.0f / swapchain.height;
+		vkCmdPushConstants(commandBuffer, gaussPipelineVertical.pipelineLayout, VK_SHADER_STAGE_FRAGMENT_BIT, 0, 4, &pixelSize);
 		vkCmdDraw(commandBuffer, 3, 1, 0, 0);
+		vkCmdEndRenderPass(commandBuffer);
 
+		// Gauss horizontal
+		beginInfo.renderPass = gaussRenderPassFinal;
+		beginInfo.framebuffer = swapchainFramebuffers[imageIndex];
+		beginInfo.renderArea = { {0, 0}, {swapchain.width, swapchain.height} };
+		vkCmdBeginRenderPass(commandBuffer, &beginInfo, VK_SUBPASS_CONTENTS_INLINE);
+		vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, gaussPipelineHorizontal.pipeline);
+		imageInfo = {sampler, gaussBuffers[imageIndex].view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
+		descriptorWrite = {VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET};
+		descriptorWrite.dstSet = gaussDescriptorSetsHorizontal[frameIndex];
+		descriptorWrite.dstBinding = 0;
+		descriptorWrite.descriptorCount = 1;
+		descriptorWrite.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+		descriptorWrite.pImageInfo = &imageInfo;
+		vkUpdateDescriptorSets(context->device, 1, &descriptorWrite, 0, 0);
+		vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, gaussPipelineHorizontal.pipelineLayout, 0, 1, &gaussDescriptorSetsHorizontal[frameIndex], 0, 0);
+		pixelSize = 1.0f / swapchain.width;
+		vkCmdPushConstants(commandBuffer, gaussPipelineHorizontal.pipelineLayout, VK_SHADER_STAGE_FRAGMENT_BIT, 0, 4, &pixelSize);
+		vkCmdDraw(commandBuffer, 3, 1, 0, 0);
 		vkCmdEndRenderPass(commandBuffer);
 
 		VK(vkCmdWriteTimestamp(commandBuffer, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, timestampQueryPools[frameIndex], 1));
@@ -675,7 +793,6 @@ void shutdownApplication() {
 	for(uint32_t i = 0; i < FRAMES_IN_FLIGHT; ++i) {
 		destroyBuffer(context, &modelUniformBuffers[i]);
 	}
-	VK(vkDestroyDescriptorSetLayout(context->device, postprocessDescriptorSetLayout, 0));
 
 	for(uint32_t i = 0; i < FRAMES_IN_FLIGHT; ++i) {
 		vkDestroyQueryPool(context->device, timestampQueryPools[i], 0);
@@ -683,6 +800,8 @@ void shutdownApplication() {
 
 	VK(vkDestroyDescriptorPool(context->device, spriteDescriptorPool, 0));
 	VK(vkDestroyDescriptorSetLayout(context->device, spriteDescriptorLayout, 0));
+	VK(vkDestroyDescriptorPool(context->device, gaussDescriptorPool, 0));
+	VK(vkDestroyDescriptorSetLayout(context->device, gaussDescriptorSetLayout, 0));
 	destroyBuffer(context, &spriteVertexBuffer);
 	destroyBuffer(context, &spriteIndexBuffer);
 	destroyImage(context, &image);
@@ -698,23 +817,39 @@ void shutdownApplication() {
 
 	destroyPipeline(context, &spritePipeline);
 	destroyPipeline(context, &modelPipeline);
-	destroyPipeline(context, &postprocessPipeline);
+	destroyPipeline(context, &gaussPipelineHorizontal);
+	destroyPipeline(context, &gaussPipelineVertical);
 
 	vkDestroySampler(context->device, sampler, 0);
+	vkDestroySampler(context->device, linearSampler, 0);
 
-	for (uint32_t i = 0; i < framebuffers.size(); ++i) {
-		VK(vkDestroyFramebuffer(context->device, framebuffers[i], 0));
+	for (uint32_t i = 0; i < sceneFramebuffers.size(); ++i) {
+		VK(vkDestroyFramebuffer(context->device, sceneFramebuffers[i], 0));
+		VK(vkDestroyFramebuffer(context->device, gaussFramebuffers[i], 0));
+		VK(vkDestroyFramebuffer(context->device, swapchainFramebuffers[i], 0));
 	}
-	framebuffers.clear();
+	sceneFramebuffers.clear();
+	gaussFramebuffers.clear();
+	swapchainFramebuffers.clear();
 	for(uint32_t i = 0; i < depthBuffers.size(); ++i) {
 		destroyImage(context, &depthBuffers[i]);
 	}
 	for(uint32_t i = 0; i < colorBuffers.size(); ++i) {
 		destroyImage(context, &colorBuffers[i]);
 	}
+	for(uint32_t i = 0; i < multisampleTargetBuffers.size(); ++i) {
+		destroyImage(context, &multisampleTargetBuffers[i]);
+	}
+	for(uint32_t i = 0; i < gaussBuffers.size(); ++i) {
+		destroyImage(context, &gaussBuffers[i]);
+	}
 	colorBuffers.clear();
 	depthBuffers.clear();
+	multisampleTargetBuffers.clear();
+	gaussBuffers.clear();
 	destroyRenderpass(context, renderPass);
+	destroyRenderpass(context, gaussRenderPass);
+	destroyRenderpass(context, gaussRenderPassFinal);
 	destroySwapchain(context, &swapchain);
 	VK(vkDestroySurfaceKHR(context->instance, surface, 0));
 	exitVulkan(context);
