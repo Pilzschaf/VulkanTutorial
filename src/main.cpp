@@ -63,6 +63,10 @@ VkRenderPass gaussRenderPass;
 VkRenderPass gaussRenderPassFinal;
 VkSampler linearSampler;
 
+VulkanPipeline computePipeline;
+VkDescriptorSetLayout computeDescriptorSetLayout;
+VkDescriptorSet computeDescriptorSets[FRAMES_IN_FLIGHT];
+
 VkQueryPool timestampQueryPools[FRAMES_IN_FLIGHT];
 
 VkDescriptorPool imguiDescriptorPool;
@@ -224,7 +228,7 @@ void initApplication(SDL_Window* window) {
 	context = initVulkan(instanceExtensionCount, enabledInstanceExtensions, ARRAY_COUNT(enabledDeviceExtensions), enabledDeviceExtensions);
 	
 	SDL_Vulkan_CreateSurface(window, context->instance, &surface);
-	swapchain = createSwapchain(context, surface, VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT);
+	swapchain = createSwapchain(context, surface, VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_STORAGE_BIT);
 
 	recreateRenderPass();
 
@@ -313,9 +317,10 @@ void initApplication(SDL_Window* window) {
 		VkDescriptorPoolSize poolSizes[] = {
 			{VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC, FRAMES_IN_FLIGHT},
 			{VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, FRAMES_IN_FLIGHT},
+			{VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, FRAMES_IN_FLIGHT},
 		};
 		VkDescriptorPoolCreateInfo createInfo = {VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO};
-		createInfo.maxSets = FRAMES_IN_FLIGHT;
+		createInfo.maxSets = FRAMES_IN_FLIGHT * 2;
 		createInfo.poolSizeCount = ARRAY_COUNT(poolSizes);
 		createInfo.pPoolSizes = poolSizes;
 		VKA(vkCreateDescriptorPool(context->device, &createInfo, 0, &modelDescriptorPool));
@@ -558,6 +563,24 @@ void initApplication(SDL_Window* window) {
         VKA(vkDeviceWaitIdle(context->device));
         ImGui_ImplVulkan_DestroyFontUploadObjects();
     }
+
+	{
+		VkDescriptorSetLayoutBinding bindings[] = {
+			{0, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1, VK_SHADER_STAGE_COMPUTE_BIT, 0},
+		};
+		VkDescriptorSetLayoutCreateInfo createInfo = {VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO};
+		createInfo.bindingCount = ARRAY_COUNT(bindings);
+		createInfo.pBindings = bindings;
+		VK(vkCreateDescriptorSetLayout(context->device, &createInfo, 0, &computeDescriptorSetLayout));
+	}
+	for(uint32_t i = 0; i < FRAMES_IN_FLIGHT; ++i) {
+		VkDescriptorSetAllocateInfo allocateInfo = {VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO};
+		allocateInfo.descriptorPool = modelDescriptorPool;
+		allocateInfo.descriptorSetCount = 1;
+		allocateInfo.pSetLayouts = &computeDescriptorSetLayout;
+		VKA(vkAllocateDescriptorSets(context->device, &allocateInfo, &computeDescriptorSets[i]));
+	}
+	computePipeline = createComputePipeline(context, "../shaders/compute_comp.spv", 1, &computeDescriptorSetLayout, 0, 0);
 }
 
 void recreateSwapchain() {
@@ -571,7 +594,7 @@ void recreateSwapchain() {
 
 
 	VKA(vkDeviceWaitIdle(context->device));
-	swapchain = createSwapchain(context, surface, VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT, &oldSwapchain);
+	swapchain = createSwapchain(context, surface, VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_STORAGE_BIT, &oldSwapchain);
 
 	destroySwapchain(context, &oldSwapchain);
 	recreateRenderPass();
@@ -747,6 +770,46 @@ void renderApplication() {
 
 		VK(vkCmdWriteTimestamp(commandBuffer, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, timestampQueryPools[frameIndex], 1));
 
+		{ // Swapchain Attachment Output -> Compute Write
+			VkImageSubresourceRange subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+			VkImageMemoryBarrier imageBarrier = {VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER};
+			imageBarrier.srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+			imageBarrier.dstAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+			imageBarrier.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+			imageBarrier.newLayout = VK_IMAGE_LAYOUT_GENERAL;
+			imageBarrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+			imageBarrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+			imageBarrier.image = swapchain.images[imageIndex];
+			imageBarrier.subresourceRange = subresourceRange;
+			vkCmdPipelineBarrier(commandBuffer, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 0, 0, 0, 0, 1, &imageBarrier);
+		}
+
+		vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, computePipeline.pipeline);
+		imageInfo = {0, swapchain.imageViews[imageIndex], VK_IMAGE_LAYOUT_GENERAL};
+		descriptorWrite = {VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET};
+		descriptorWrite.dstSet = computeDescriptorSets[frameIndex];
+		descriptorWrite.dstBinding = 0;
+		descriptorWrite.descriptorCount = 1;
+		descriptorWrite.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+		descriptorWrite.pImageInfo = &imageInfo;
+		vkUpdateDescriptorSets(context->device, 1, &descriptorWrite, 0, 0);
+		vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, computePipeline.pipelineLayout, 0, 1, &computeDescriptorSets[frameIndex], 0, 0);
+		vkCmdDispatch(commandBuffer, (swapchain.width + 7) / 8, (swapchain.height + 7) / 8, 1);
+
+		{ // Swapchain Compute Write -> Present
+			VkImageSubresourceRange subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+			VkImageMemoryBarrier imageBarrier = {VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER};
+			imageBarrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+			imageBarrier.dstAccessMask = VK_ACCESS_MEMORY_READ_BIT;
+			imageBarrier.oldLayout = VK_IMAGE_LAYOUT_GENERAL;
+			imageBarrier.newLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+			imageBarrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+			imageBarrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+			imageBarrier.image = swapchain.images[imageIndex];
+			imageBarrier.subresourceRange = subresourceRange;
+			vkCmdPipelineBarrier(commandBuffer, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, 0, 0, 0, 0, 0, 1, &imageBarrier);
+		}
+
 		VKA(vkEndCommandBuffer(commandBuffer));
 	}
 	
@@ -802,6 +865,7 @@ void shutdownApplication() {
 	VK(vkDestroyDescriptorSetLayout(context->device, spriteDescriptorLayout, 0));
 	VK(vkDestroyDescriptorPool(context->device, gaussDescriptorPool, 0));
 	VK(vkDestroyDescriptorSetLayout(context->device, gaussDescriptorSetLayout, 0));
+	VK(vkDestroyDescriptorSetLayout(context->device, computeDescriptorSetLayout, 0));
 	destroyBuffer(context, &spriteVertexBuffer);
 	destroyBuffer(context, &spriteIndexBuffer);
 	destroyImage(context, &image);
@@ -819,6 +883,7 @@ void shutdownApplication() {
 	destroyPipeline(context, &modelPipeline);
 	destroyPipeline(context, &gaussPipelineHorizontal);
 	destroyPipeline(context, &gaussPipelineVertical);
+	destroyPipeline(context, &computePipeline);
 
 	vkDestroySampler(context->device, sampler, 0);
 	vkDestroySampler(context->device, linearSampler, 0);

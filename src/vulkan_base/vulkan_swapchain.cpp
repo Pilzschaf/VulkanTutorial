@@ -23,6 +23,18 @@ VulkanSwapchain createSwapchain(VulkanContext* context, VkSurfaceKHR surface, Vk
 	// First available format should be a sensible default in most cases
 	VkFormat format = availableFormats[0].format;
 	VkColorSpaceKHR colorSpace = availableFormats[0].colorSpace;
+	for(uint32_t i = 0; i < numFormats; ++i) {
+		format = availableFormats[i].format;
+		colorSpace = availableFormats[i].colorSpace;
+
+		VkImageFormatProperties formatProperties;
+		VkResult formatResult = vkGetPhysicalDeviceImageFormatProperties(context->physicalDevice, format, VK_IMAGE_TYPE_2D, VK_IMAGE_TILING_OPTIMAL, usage, 0, &formatProperties);
+		if(formatResult == VK_ERROR_FORMAT_NOT_SUPPORTED) {
+			LOG_ERROR("Swapchain format does not support requested usage flags");
+		} else {
+			break;
+		}
+	}
 
 	VkSurfaceCapabilitiesKHR surfaceCapabilities;
 	VKA(vkGetPhysicalDeviceSurfaceCapabilitiesKHR(context->physicalDevice, surface, &surfaceCapabilities));

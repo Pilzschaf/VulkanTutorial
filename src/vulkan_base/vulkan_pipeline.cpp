@@ -131,6 +131,43 @@ VulkanPipeline createPipeline(VulkanContext* context, const char* vertexShaderFi
 	return result;
 }
 
+VulkanPipeline createComputePipeline(VulkanContext* context, const char* shaderFilename,
+							  		 uint32_t numSetLayouts, VkDescriptorSetLayout* setLayouts, VkPushConstantRange* pushConstant, VkSpecializationInfo* specializationInfo) {
+	VkShaderModule shaderModule = createShaderModule(context, shaderFilename);
+	VkPipelineShaderStageCreateInfo shaderStage;
+	shaderStage = { VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO };
+	shaderStage.stage = VK_SHADER_STAGE_COMPUTE_BIT;
+	shaderStage.module = shaderModule;
+	shaderStage.pName = "main";
+	shaderStage.pSpecializationInfo = specializationInfo;
+
+	VkPipelineLayout pipelineLayout;
+	{
+		VkPipelineLayoutCreateInfo createInfo = { VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO };
+		createInfo.setLayoutCount = numSetLayouts;
+		createInfo.pSetLayouts = setLayouts;
+		createInfo.pushConstantRangeCount = pushConstant ? 1 : 0;
+		createInfo.pPushConstantRanges = pushConstant;
+		VKA(vkCreatePipelineLayout(context->device, &createInfo, 0, &pipelineLayout));
+	}
+
+	VkPipeline pipeline;
+	{
+		VkComputePipelineCreateInfo createInfo = {VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO};
+		createInfo.stage = shaderStage;
+		createInfo.layout = pipelineLayout;
+		VKA(vkCreateComputePipelines(context->device, 0, 1, &createInfo, 0, &pipeline));
+	}
+
+	// Module can be destroyed after pipeline creation
+	VK(vkDestroyShaderModule(context->device, shaderModule, 0));
+
+	VulkanPipeline result = {};
+	result.pipeline = pipeline;
+	result.pipelineLayout = pipelineLayout;
+	return result;
+}
+
 void destroyPipeline(VulkanContext* context, VulkanPipeline* pipeline) {
 	VK(vkDestroyPipeline(context->device, pipeline->pipeline, 0));
 	VK(vkDestroyPipelineLayout(context->device, pipeline->pipelineLayout, 0));

@@ -10,3 +10,4 @@ glslc.exe -fshader-stage=vert postprocess_vert.glsl -o postprocess_vert.spv
 glslc.exe -fshader-stage=frag postprocess_frag.glsl -o postprocess_frag.spv
 glslc.exe -fshader-stage=vert gaussian_vert.glsl -o gaussian_vert.spv
 glslc.exe -fshader-stage=frag gaussian_frag.glsl -o gaussian_frag.spv
+glslc.exe -fshader-stage=comp compute_comp.glsl -o compute_comp.spv
