@@ -123,6 +123,12 @@ void recreateRenderPass() {
 		for(uint32_t i = 0; i < colorBuffers.size(); ++i) {
 			destroyImage(context, &colorBuffers[i]);
 		}
+		for(uint32_t i = 0; i < multisampleTargetBuffers.size(); ++i) {
+			destroyImage(context, &multisampleTargetBuffers[i]);
+		}
+		for(uint32_t i = 0; i < gaussBuffers.size(); ++i) {
+			destroyImage(context, &gaussBuffers[i]);
+		}
 		destroyRenderpass(context, renderPass);
 		destroyRenderpass(context, gaussRenderPass);
 		destroyRenderpass(context, gaussRenderPassFinal);
@@ -149,7 +155,7 @@ void recreateRenderPass() {
 	for (uint32_t i = 0; i < swapchain.images.size(); ++i) {
 		createImage(context, &depthBuffers.data()[i], swapchain.width, swapchain.height, VK_FORMAT_D32_SFLOAT, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT, VK_SAMPLE_COUNT_4_BIT);
 		createImage(context, &colorBuffers.data()[i], swapchain.width, swapchain.height, swapchain.format, VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT, VK_SAMPLE_COUNT_4_BIT);
-		createImage(context, &multisampleTargetBuffers.data()[i], swapchain.width, swapchain.height, swapchain.format, VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT);
+		createImage(context, &multisampleTargetBuffers.data()[i], swapchain.width, swapchain.height, swapchain.format, VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT);
 		createImage(context, &gaussBuffers.data()[i], swapchain.width, swapchain.height, swapchain.format, VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT);
 		
 		VkFramebufferCreateInfo createInfo = { VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO };
@@ -317,7 +323,7 @@ void initApplication(SDL_Window* window) {
 		VkDescriptorPoolSize poolSizes[] = {
 			{VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC, FRAMES_IN_FLIGHT},
 			{VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, FRAMES_IN_FLIGHT},
-			{VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, FRAMES_IN_FLIGHT},
+			{VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, FRAMES_IN_FLIGHT * 2},
 		};
 		VkDescriptorPoolCreateInfo createInfo = {VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO};
 		createInfo.maxSets = FRAMES_IN_FLIGHT * 2;
@@ -567,6 +573,7 @@ void initApplication(SDL_Window* window) {
 	{
 		VkDescriptorSetLayoutBinding bindings[] = {
 			{0, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1, VK_SHADER_STAGE_COMPUTE_BIT, 0},
+			{1, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1, VK_SHADER_STAGE_COMPUTE_BIT, 0},
 		};
 		VkDescriptorSetLayoutCreateInfo createInfo = {VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO};
 		createInfo.bindingCount = ARRAY_COUNT(bindings);
@@ -616,6 +623,7 @@ void renderApplication() {
 	static float greenChannel = 0.0f;
 	static float time = 0.0f;
 	static double frameGpuAvg = 0.0;
+	static double computeAvg = 0.0;
 	time += 0.01f;
 	greenChannel += 0.01f;
 	if (greenChannel > 1.0f) greenChannel = 0.0f;
@@ -640,13 +648,16 @@ void renderApplication() {
 	}
 
 	// Query timestamps
-	uint64_t timestamps[2] = {};
+	uint64_t timestamps[3] = {};
 	VkResult timestampsValid = VK(vkGetQueryPoolResults(context->device, timestampQueryPools[frameIndex], 0, ARRAY_COUNT(timestamps), sizeof(timestamps), timestamps, sizeof(timestamps[0]), VK_QUERY_RESULT_64_BIT));
 	if(timestampsValid == VK_SUCCESS) {
 		double frameGpuBegin = double(timestamps[0]) * context->physicalDeviceProperties.limits.timestampPeriod * 1e-6;
 		double frameGpuEnd = double(timestamps[1]) * context->physicalDeviceProperties.limits.timestampPeriod * 1e-6;
+		double comptueEnd = double(timestamps[2]) * context->physicalDeviceProperties.limits.timestampPeriod * 1e-6;
 		frameGpuAvg = frameGpuAvg * 0.95 + (frameGpuEnd - frameGpuBegin) * 0.05;
+		computeAvg = computeAvg * 0.95 + (comptueEnd - frameGpuEnd) * 0.05;
 		//LOG_INFO("GPU frametime: ", frameGpuAvg, "ms");
+		LOG_INFO("Compute time: ", computeAvg, "ms");
 	}
 
 	VKA(vkResetCommandPool(context->device, commandPools[frameIndex], 0));
@@ -783,18 +794,40 @@ void renderApplication() {
 			imageBarrier.subresourceRange = subresourceRange;
 			vkCmdPipelineBarrier(commandBuffer, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 0, 0, 0, 0, 1, &imageBarrier);
 		}
+		{ // MultisampleTarget Shader Read -> Compute Read
+			VkImageSubresourceRange subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+			VkImageMemoryBarrier imageBarrier = {VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER};
+			imageBarrier.srcAccessMask = VK_ACCESS_SHADER_READ_BIT;
+			imageBarrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+			imageBarrier.oldLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+			imageBarrier.newLayout = VK_IMAGE_LAYOUT_GENERAL;
+			imageBarrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+			imageBarrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+			imageBarrier.image = multisampleTargetBuffers[imageIndex].image;
+			imageBarrier.subresourceRange = subresourceRange;
+			vkCmdPipelineBarrier(commandBuffer, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 0, 0, 0, 0, 1, &imageBarrier);
+		}
 
 		vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, computePipeline.pipeline);
 		imageInfo = {0, swapchain.imageViews[imageIndex], VK_IMAGE_LAYOUT_GENERAL};
-		descriptorWrite = {VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET};
-		descriptorWrite.dstSet = computeDescriptorSets[frameIndex];
-		descriptorWrite.dstBinding = 0;
-		descriptorWrite.descriptorCount = 1;
-		descriptorWrite.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
-		descriptorWrite.pImageInfo = &imageInfo;
-		vkUpdateDescriptorSets(context->device, 1, &descriptorWrite, 0, 0);
+		VkDescriptorImageInfo imageInfo2 = {0, multisampleTargetBuffers[imageIndex].view, VK_IMAGE_LAYOUT_GENERAL};
+		VkWriteDescriptorSet descriptorWrites[2];
+		descriptorWrites[0] = {VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET};
+		descriptorWrites[0].dstSet = computeDescriptorSets[frameIndex];
+		descriptorWrites[0].dstBinding = 0;
+		descriptorWrites[0].descriptorCount = 1;
+		descriptorWrites[0].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+		descriptorWrites[0].pImageInfo = &imageInfo;
+		descriptorWrites[1] = {VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET};
+		descriptorWrites[1].dstSet = computeDescriptorSets[frameIndex];
+		descriptorWrites[1].dstBinding = 1;
+		descriptorWrites[1].descriptorCount = 1;
+		descriptorWrites[1].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+		descriptorWrites[1].pImageInfo = &imageInfo2;
+		vkUpdateDescriptorSets(context->device, ARRAY_COUNT(descriptorWrites), descriptorWrites, 0, 0);
 		vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, computePipeline.pipelineLayout, 0, 1, &computeDescriptorSets[frameIndex], 0, 0);
-		vkCmdDispatch(commandBuffer, (swapchain.width + 7) / 8, (swapchain.height + 7) / 8, 1);
+		#define GROUP_SIZE 8
+		vkCmdDispatch(commandBuffer, (swapchain.width + (GROUP_SIZE-1)) / GROUP_SIZE, (swapchain.height + (GROUP_SIZE-1)) / GROUP_SIZE, 1);
 
 		{ // Swapchain Compute Write -> Present
 			VkImageSubresourceRange subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
@@ -809,6 +842,8 @@ void renderApplication() {
 			imageBarrier.subresourceRange = subresourceRange;
 			vkCmdPipelineBarrier(commandBuffer, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, 0, 0, 0, 0, 0, 1, &imageBarrier);
 		}
+
+		VK(vkCmdWriteTimestamp(commandBuffer, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, timestampQueryPools[frameIndex], 2));
 
 		VKA(vkEndCommandBuffer(commandBuffer));
 	}
