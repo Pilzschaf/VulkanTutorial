@@ -28,7 +28,7 @@ VkShaderModule createShaderModule(VulkanContext* context, const char* shaderFile
 }
 
 VulkanPipeline createPipeline(VulkanContext* context, const char* vertexShaderFilename, const char* fragmentShaderFilename, VkRenderPass renderPass, uint32_t width, uint32_t height,
-							  VkVertexInputAttributeDescription* attributes, uint32_t numAttributes, VkVertexInputBindingDescription* binding, uint32_t numSetLayouts, VkDescriptorSetLayout* setLayouts, VkPushConstantRange* pushConstant, uint32_t subpassIndex, VkSampleCountFlagBits sampleCount, VkSpecializationInfo* specializationInfo) {
+							  VkVertexInputAttributeDescription* attributes, uint32_t numAttributes, VkVertexInputBindingDescription* binding, uint32_t numSetLayouts, VkDescriptorSetLayout* setLayouts, VkPushConstantRange* pushConstant, uint32_t subpassIndex, VkSampleCountFlagBits sampleCount, VkSpecializationInfo* specializationInfo, VkPipelineCache pipelineCache) {
 	VkShaderModule vertexShaderModule = createShaderModule(context, vertexShaderFilename);
 	VkShaderModule fragmentShaderModule = createShaderModule(context, fragmentShaderFilename);
 
@@ -118,7 +118,7 @@ VulkanPipeline createPipeline(VulkanContext* context, const char* vertexShaderFi
 		createInfo.layout = pipelineLayout;
 		createInfo.renderPass = renderPass;
 		createInfo.subpass = subpassIndex;
-		VKA(vkCreateGraphicsPipelines(context->device, 0, 1, &createInfo, 0, &pipeline));
+		VKA(vkCreateGraphicsPipelines(context->device, pipelineCache, 1, &createInfo, 0, &pipeline));
 	}
 
 	// Module can be destroyed after pipeline creation
@@ -132,7 +132,7 @@ VulkanPipeline createPipeline(VulkanContext* context, const char* vertexShaderFi
 }
 
 VulkanPipeline createComputePipeline(VulkanContext* context, const char* shaderFilename,
-							  		 uint32_t numSetLayouts, VkDescriptorSetLayout* setLayouts, VkPushConstantRange* pushConstant, VkSpecializationInfo* specializationInfo) {
+							  		 uint32_t numSetLayouts, VkDescriptorSetLayout* setLayouts, VkPushConstantRange* pushConstant, VkSpecializationInfo* specializationInfo, VkPipelineCache pipelineCache) {
 	VkShaderModule shaderModule = createShaderModule(context, shaderFilename);
 	VkPipelineShaderStageCreateInfo shaderStage;
 	shaderStage = { VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO };
@@ -156,7 +156,7 @@ VulkanPipeline createComputePipeline(VulkanContext* context, const char* shaderF
 		VkComputePipelineCreateInfo createInfo = {VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO};
 		createInfo.stage = shaderStage;
 		createInfo.layout = pipelineLayout;
-		VKA(vkCreateComputePipelines(context->device, 0, 1, &createInfo, 0, &pipeline));
+		VKA(vkCreateComputePipelines(context->device, pipelineCache, 1, &createInfo, 0, &pipeline));
 	}
 
 	// Module can be destroyed after pipeline creation
@@ -171,4 +171,42 @@ VulkanPipeline createComputePipeline(VulkanContext* context, const char* shaderF
 void destroyPipeline(VulkanContext* context, VulkanPipeline* pipeline) {
 	VK(vkDestroyPipeline(context->device, pipeline->pipeline, 0));
 	VK(vkDestroyPipelineLayout(context->device, pipeline->pipelineLayout, 0));
+}
+
+VkPipelineCache createPipelineCache(VulkanContext* context, const char* filename) {
+	VkPipelineCache result = {0};
+
+	FILE* file = fopen(filename, "rb");
+	long fileSize = 0;
+	uint8_t* buffer = 0;
+	if(file) {
+		fseek(file, 0, SEEK_END);
+		fileSize = ftell(file);
+		fseek(file, 0, SEEK_SET);
+		buffer = new uint8_t[fileSize];
+		fread(buffer, 1, fileSize, file);
+	}
+
+	VkPipelineCacheCreateInfo createInfo = {VK_STRUCTURE_TYPE_PIPELINE_CACHE_CREATE_INFO};
+	if(buffer) {
+		createInfo.initialDataSize = fileSize;
+		createInfo.pInitialData = buffer;
+	}
+	vkCreatePipelineCache(context->device, &createInfo, 0, &result);
+
+	if(buffer) {
+		delete[] buffer;
+	}
+	return result;
+}
+
+void destroyPipelineCache(VulkanContext* context, VkPipelineCache cache, const char* filename) {
+	size_t cacheSize = 0;
+	vkGetPipelineCacheData(context->device, cache, &cacheSize, 0);
+	uint8_t* cacheData = new uint8_t[cacheSize];
+	vkGetPipelineCacheData(context->device, cache, &cacheSize, cacheData);
+	FILE* file = fopen(filename, "wb");
+	fwrite(cacheData, sizeof(uint8_t), cacheSize, file);
+	delete[] cacheData;
+	vkDestroyPipelineCache(context->device, cache, 0);
 }

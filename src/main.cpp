@@ -35,6 +35,7 @@ VkCommandBuffer commandBuffers[FRAMES_IN_FLIGHT];
 VkFence fences[FRAMES_IN_FLIGHT];
 VkSemaphore acquireSemaphores[FRAMES_IN_FLIGHT];
 VkSemaphore releaseSemaphores[FRAMES_IN_FLIGHT];
+VkPipelineCache pipelineCache;
 
 VulkanBuffer spriteVertexBuffer;
 VulkanBuffer spriteIndexBuffer;
@@ -236,6 +237,8 @@ void initApplication(SDL_Window* window) {
 	SDL_Vulkan_CreateSurface(window, context->instance, &surface);
 	swapchain = createSwapchain(context, surface, VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_STORAGE_BIT);
 
+	pipelineCache = createPipelineCache(context, "../shaders/pipeline_cache.bin");
+
 	recreateRenderPass();
 
 	//model = createModel(context, "../data/models/monkey.glb");
@@ -396,7 +399,7 @@ void initApplication(SDL_Window* window) {
 	vertexInputBinding.inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
 	vertexInputBinding.stride = sizeof(float) * 7;
 	spritePipeline = createPipeline(context, "../shaders/texture_vert.spv", "../shaders/texture_frag.spv", renderPass, swapchain.width, swapchain.height, 
-									vertexAttributeDescriptions, ARRAY_COUNT(vertexAttributeDescriptions), &vertexInputBinding, 1, &spriteDescriptorLayout, 0, 0, VK_SAMPLE_COUNT_4_BIT);
+									vertexAttributeDescriptions, ARRAY_COUNT(vertexAttributeDescriptions), &vertexInputBinding, 1, &spriteDescriptorLayout, 0, 0, VK_SAMPLE_COUNT_4_BIT, 0, pipelineCache);
 
 
 	VkVertexInputAttributeDescription modelAttributeDescriptions[3] = {};
@@ -417,7 +420,7 @@ void initApplication(SDL_Window* window) {
 	modelInputBinding.inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
 	modelInputBinding.stride = sizeof(float) * 8;
 	modelPipeline = createPipeline(context, "../shaders/model_vert.spv", "../shaders/model_frag.spv", renderPass, swapchain.width, swapchain.height,
-									modelAttributeDescriptions, ARRAY_COUNT(modelAttributeDescriptions), &modelInputBinding, 1, &modelDescriptorSetLayout, 0, 0, VK_SAMPLE_COUNT_4_BIT);
+									modelAttributeDescriptions, ARRAY_COUNT(modelAttributeDescriptions), &modelInputBinding, 1, &modelDescriptorSetLayout, 0, 0, VK_SAMPLE_COUNT_4_BIT, 0, pipelineCache);
 
 	
 	// Preparations for Guassian Blur pass
@@ -465,8 +468,8 @@ void initApplication(SDL_Window* window) {
 	specializationInfo.dataSize = sizeof(vertical);
 	specializationInfo.pData = &vertical;
 
-	gaussPipelineVertical = createPipeline(context, "../shaders/gaussian_vert.spv", "../shaders/gaussian_frag.spv", gaussRenderPass, swapchain.width, swapchain.height, 0, 0, 0, 1, &gaussDescriptorSetLayout, &pushConstants, 0, VK_SAMPLE_COUNT_1_BIT, &specializationInfo);
-	gaussPipelineHorizontal = createPipeline(context, "../shaders/gaussian_vert.spv", "../shaders/gaussian_frag.spv", gaussRenderPassFinal, swapchain.width, swapchain.height, 0, 0, 0, 1, &gaussDescriptorSetLayout, &pushConstants, 0, VK_SAMPLE_COUNT_1_BIT);
+	gaussPipelineVertical = createPipeline(context, "../shaders/gaussian_vert.spv", "../shaders/gaussian_frag.spv", gaussRenderPass, swapchain.width, swapchain.height, 0, 0, 0, 1, &gaussDescriptorSetLayout, &pushConstants, 0, VK_SAMPLE_COUNT_1_BIT, &specializationInfo, pipelineCache);
+	gaussPipelineHorizontal = createPipeline(context, "../shaders/gaussian_vert.spv", "../shaders/gaussian_frag.spv", gaussRenderPassFinal, swapchain.width, swapchain.height, 0, 0, 0, 1, &gaussDescriptorSetLayout, &pushConstants, 0, VK_SAMPLE_COUNT_1_BIT, 0, pipelineCache);
 
 	for(uint32_t i = 0; i < ARRAY_COUNT(fences); ++i) {
 		VkFenceCreateInfo createInfo = { VK_STRUCTURE_TYPE_FENCE_CREATE_INFO };
@@ -922,6 +925,8 @@ void shutdownApplication() {
 
 	vkDestroySampler(context->device, sampler, 0);
 	vkDestroySampler(context->device, linearSampler, 0);
+
+	destroyPipelineCache(context, pipelineCache, "../shaders/pipeline_cache.bin");
 
 	for (uint32_t i = 0; i < sceneFramebuffers.size(); ++i) {
 		VK(vkDestroyFramebuffer(context->device, sceneFramebuffers[i], 0));
